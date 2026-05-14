@@ -1,956 +1,408 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useAccount, useChainId } from 'wagmi';
-import { getContractService, TimeToken } from '../services/contractService';
-import { formatEther } from 'viem';
-import { isSupportedChain, getChainDisplayName } from '../lib/wagmi';
-import NotificationCenter from './NotificationCenter';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { getAlertAgent, AlertNotification } from '../services/alertAgent';
+import {
+  Activity,
+  ArrowRight,
+  BookOpen,
+  CalendarClock,
+  CircleAlert,
+  Coins,
+  Layers3,
+  Plus,
+  ShieldCheck,
+  WalletCards,
+} from 'lucide-react';
+import { useAccount, useChainId } from 'wagmi';
+import { getChainDisplayName } from '../lib/wagmi';
+import { getTimeMarketContracts } from '../shared/constants';
+import { isV4SupportedChainId } from '../shared/uniswapV4';
 
 interface DashboardProps {
   onCreateToken?: () => void;
   onViewMarketplace?: () => void;
 }
 
-interface DashboardStats {
-  totalTokensCreated: number;
-  totalTokensPurchased: number;
-  totalEarnings: number;
-  totalSpent: number;
-  activeTokens: number;
-  completedServices: number;
+type StatusTone = 'success' | 'warning' | 'neutral';
+
+interface BookingRow {
+  id: string;
+  provider: string;
+  status: string;
+  tone: StatusTone;
+  hours: string;
+  slot: string;
+  settlement: string;
+}
+
+interface InventoryRow {
+  service: string;
+  available: string;
+  booked: string;
+  poolDepth: string;
+  status: string;
+  tone: StatusTone;
+}
+
+const bookingRows: BookingRow[] = [
+  {
+    id: 'B-1042-2H',
+    provider: 'Protocol architecture review',
+    status: 'Booked',
+    tone: 'success',
+    hours: '2 TIME',
+    slot: 'May 16, 14:00',
+    settlement: 'Credits locked',
+  },
+  {
+    id: 'B-1188-4H',
+    provider: 'AI workflow implementation',
+    status: 'Pending completion',
+    tone: 'neutral',
+    hours: '4 TIME',
+    slot: 'May 18, 17:30',
+    settlement: 'Escrow active',
+  },
+  {
+    id: 'B-1215-1H',
+    provider: 'Security tabletop session',
+    status: 'Quote expires soon',
+    tone: 'warning',
+    hours: '1 TIME',
+    slot: 'May 20, 09:00',
+    settlement: 'Needs submit',
+  },
+];
+
+const inventoryRows: InventoryRow[] = [
+  {
+    service: 'Protocol architecture review',
+    available: '18h',
+    booked: '6h',
+    poolDepth: '$82k',
+    status: 'Online',
+    tone: 'success',
+  },
+  {
+    service: 'Security tabletop session',
+    available: '6h',
+    booked: '12h',
+    poolDepth: '$63k',
+    status: 'Low inventory',
+    tone: 'warning',
+  },
+  {
+    service: 'Launch readiness review',
+    available: '0h',
+    booked: '9h',
+    poolDepth: '$31k',
+    status: 'Paused',
+    tone: 'neutral',
+  },
+];
+
+const emptyContracts = {
+  timeCreditToken: '0x0000000000000000000000000000000000000000',
+  bookingManager: '0x0000000000000000000000000000000000000000',
+  timePoolHook: '0x0000000000000000000000000000000000000000',
+  usdc: '0x0000000000000000000000000000000000000000',
+} as const;
+
+function shortAddress(value?: string) {
+  if (!value) return 'Not connected';
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
+function statusClass(tone: StatusTone) {
+  switch (tone) {
+    case 'success':
+      return 'border-[var(--success)] bg-[var(--jade-muted)] text-[var(--text-strong)]';
+    case 'warning':
+      return 'border-[var(--warning)] bg-[var(--amber-muted)] text-[var(--text-strong)]';
+    default:
+      return 'border-[var(--border-muted)] bg-[var(--surface-subtle)] text-[var(--text)]';
+  }
+}
+
+function contractStatus(value: `0x${string}`) {
+  return value === '0x0000000000000000000000000000000000000000'
+    ? 'Not configured'
+    : `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
 export default function Dashboard({ onCreateToken, onViewMarketplace }: DashboardProps) {
-  const { isConnected, address } = useAccount();
+  const { address, isConnected } = useAccount();
   const chainId = useChainId();
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'created' | 'purchased' | 'earnings' | 'activity'>('overview');
-  const [createdTokens, setCreatedTokens] = useState<TimeToken[]>([]);
-  const [purchasedTokens, setPurchasedTokens] = useState<TimeToken[]>([]);
-  const [stats, setStats] = useState<DashboardStats>({
-    totalTokensCreated: 0,
-    totalTokensPurchased: 0,
-    totalEarnings: 0,
-    totalSpent: 0,
-    activeTokens: 0,
-    completedServices: 0
-  });
-  const [recentActivity, setRecentActivity] = useState<AlertNotification[]>([]);
-  const [avaxPriceUSD, setAvaxPriceUSD] = useState<number>(0);
-  const [selectedToken, setSelectedToken] = useState<TimeToken | null>(null);
-  const [showTokenModal, setShowTokenModal] = useState(false);
-
-  const contractService = getContractService();
-  const alertAgent = getAlertAgent();
-
-  // Function to fetch current AVAX price in USD
-  const fetchAvaxPrice = async (): Promise<number> => {
-    try {
-      console.log('💰 Fetching AVAX price...');
-      const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=avalanche-2&vs_currencies=usd');
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch AVAX price');
-      }
-
-      const data = await response.json();
-      const price = data['avalanche-2']?.usd || 0;
-      console.log('💰 Current AVAX price:', price, 'USD');
-      return price;
-    } catch (error) {
-      console.error('❌ Failed to fetch AVAX price:', error);
-      // Return a fallback price or 0 if API fails
-      return 40; // Fallback price - you can adjust this or use a cached price
-    }
-  };
-
-  useEffect(() => {
-    if (isConnected && address && isSupportedChain(chainId)) {
-      loadDashboardData();
-    } else {
-      setLoading(false);
-    }
-  }, [isConnected, address, chainId]);
-
-  const loadDashboardData = async () => {
-    if (!address) return;
-
-    try {
-      setLoading(true);
-      console.log('📊 Loading dashboard data for:', address);
-
-      // Fetch AVAX price first
-      const currentAvaxPrice = await fetchAvaxPrice();
-      setAvaxPriceUSD(currentAvaxPrice);
-
-      // Load created tokens
-      const createdTokenIds = await contractService.getCreatorTokens(address);
-      const createdTokensPromises = createdTokenIds.map(id =>
-        contractService.getTimeToken(id.toString())
-      );
-      const createdTokensData = await Promise.all(createdTokensPromises);
-      const validCreatedTokens = createdTokensData.filter((token): token is TimeToken => token !== null);
-
-      // Load purchased tokens
-      const purchasedTokenIds = await contractService.getBuyerTokens(address);
-      const purchasedTokensPromises = purchasedTokenIds.map(id =>
-        contractService.getTimeToken(id.toString())
-      );
-      const purchasedTokensData = await Promise.all(purchasedTokensPromises);
-      // Load purchased tokens with balance information
-      const validPurchasedTokens = await contractService.getBuyerTokensWithBalances(address);
-
-      setCreatedTokens(validCreatedTokens);
-      setPurchasedTokens(validPurchasedTokens);
-
-      // Calculate stats with USD conversion
-      const dashboardStats: DashboardStats = {
-        totalTokensCreated: validCreatedTokens.length,
-        totalTokensPurchased: validPurchasedTokens.length,
-
-        // Convert totalEarnings from AVAX to USD
-        totalEarnings: validCreatedTokens.reduce((total, token) => {
-          const soldHours = Number(token.totalHours) - Number(token.availableHours);
-          const avaxAmount = soldHours * parseFloat(formatEther(token.pricePerHour));
-          const usdAmount = avaxAmount * currentAvaxPrice;
-          return total + usdAmount;
-        }, 0),
-
-        // Convert totalSpent from AVAX to USD
-        totalSpent: validPurchasedTokens.reduce((total, token) => {
-          // Simplified calculation - in production, track actual purchase amounts
-          const avaxAmount = 10 * parseFloat(formatEther(token.pricePerHour)); // Assume average 10 hours purchased
-          const usdAmount = avaxAmount * currentAvaxPrice;
-          return total + usdAmount;
-        }, 0),
-
-        activeTokens: validCreatedTokens.filter(token =>
-          token.isActive && Number(token.availableHours) > 0 && !contractService.isTokenExpired(token.validUntil)
-        ).length,
-        completedServices: validCreatedTokens.reduce((total, token) => {
-          return total + (Number(token.totalHours) - Number(token.availableHours));
-        }, 0)
-      };
-
-      setStats(dashboardStats);
-
-      // Load recent activity from notifications
-      const notifications = alertAgent.getNotifications().slice(0, 10);
-      setRecentActivity(notifications);
-
-      console.log('✅ Dashboard data loaded:', dashboardStats);
-      console.log('💰 AVAX Price used for conversion:', currentAvaxPrice, 'USD');
-
-    } catch (error) {
-      console.error('❌ Failed to load dashboard data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDeactivateToken = async (tokenId: string) => {
-    if (!confirm('Are you sure you want to deactivate this token? This action cannot be undone.')) {
-      return;
-    }
-
-    try {
-      await contractService.deactivateToken(tokenId);
-      await loadDashboardData(); // Reload data
-    } catch (error) {
-      console.error('❌ Failed to deactivate token:', error);
-    }
-  };
-
-  const handleViewServiceDetails = (token: TimeToken) => {
-    setSelectedToken(token);
-    setShowTokenModal(true);
-  };
-
-  const handleCloseModal = () => {
-    setShowTokenModal(false);
-    setSelectedToken(null);
-  };
-
-  const formatPrice = (priceWei: bigint) => {
-    return parseFloat(formatEther(priceWei)).toFixed(2);
-  };
-
-  // New function to format price in USD
-  const formatPriceUSD = (priceWei: bigint) => {
-    const avaxAmount = parseFloat(formatEther(priceWei));
-    const usdAmount = avaxAmount * avaxPriceUSD;
-    return usdAmount.toFixed(2);
-  };
-
-  const formatValidUntil = (timestamp: bigint) => {
-    const date = new Date(Number(timestamp) * 1000);
-    return date.toLocaleDateString();
-  };
-
-  const isExpired = (timestamp: bigint) => {
-    return contractService.isTokenExpired(timestamp);
-  };
-
-  const getTokenStatus = (token: TimeToken) => {
-    if (!token.isActive) return { status: 'Deactivated', color: 'text-gray-400 bg-gray-500/20' };
-    if (isExpired(token.validUntil)) return { status: 'Expired', color: 'text-red-400 bg-red-500/20' };
-    if (Number(token.availableHours) === 0) return { status: 'Sold Out', color: 'text-yellow-400 bg-yellow-500/20' };
-    return { status: 'Active', color: 'text-green-400 bg-green-500/20' };
-  };
-
-  const formatActivityTime = (timestamp: number) => {
-    const now = Date.now();
-    const diff = now - timestamp;
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-
-    if (hours < 1) return 'Just now';
-    if (hours < 24) return `${hours}h ago`;
-    if (days < 7) return `${days}d ago`;
-    return new Date(timestamp).toLocaleDateString();
-  };
-
-  const tabs = [
-    { id: 'overview', label: '📊 Overview', icon: '📊' },
-    { id: 'created', label: '🎨 Created Tokens', icon: '🎨' },
-    { id: 'purchased', label: '🛒 Purchased', icon: '🛒' },
-    { id: 'earnings', label: '💰 Earnings', icon: '💰' },
-    { id: 'activity', label: '📈 Activity', icon: '📈' }
-  ];
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-400 via-blue-500 to-purple-600 flex items-center justify-center">
-        <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 text-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-white mx-auto mb-4"></div>
-          <h2 className="text-white text-xl font-bold mb-2">Loading Dashboard</h2>
-          <p className="text-white/70">Fetching your time token portfolio...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isConnected) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-400 via-blue-500 to-purple-600 flex items-center justify-center">
-        <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 text-center max-w-md">
-          <div className="text-6xl mb-6">🔗</div>
-          <h2 className="text-white text-2xl font-bold mb-4">Connect Your Wallet</h2>
-          <p className="text-white/70 mb-6">Connect your wallet to view your Time Tokenizer dashboard</p>
-          <ConnectButton />
-        </div>
-      </div>
-    );
-  }
-
-  if (!isSupportedChain(chainId)) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-400 via-blue-500 to-purple-600 flex items-center justify-center">
-        <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 text-center max-w-md">
-          <div className="text-6xl mb-6">⚠️</div>
-          <h2 className="text-white text-2xl font-bold mb-4">Unsupported Network</h2>
-          <p className="text-white/70 mb-6">
-            Please switch to {getChainDisplayName(chainId)} to view your dashboard
-          </p>
-          <ConnectButton />
-        </div>
-      </div>
-    );
-  }
+  const chainName = getChainDisplayName(chainId);
+  const wrongNetwork = !isV4SupportedChainId(chainId);
+  const contracts = getTimeMarketContracts(chainId) ?? emptyContracts;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-400 via-blue-500 to-purple-600 p-8">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-8">
+    <main className="protocol-shell px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1400px]">
+        <div className="material-panel mb-4 flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-4xl md:text-5xl font-bold text-white mb-2">
-              📊 Your Dashboard
-            </h1>
-            <p className="text-white/80 text-xl">
-              Manage your time tokens and track your earnings
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-faint)]">
+              Portfolio
             </p>
-            {avaxPriceUSD > 0 && (
-              <p className="text-white/60 text-sm mt-1">
-                💰 AVAX Price: ${avaxPriceUSD.toFixed(2)} USD
-              </p>
-            )}
+            <h1 className="mt-1 text-[28px] font-semibold leading-tight text-[var(--text-strong)]">
+              Booking and liquidity command center
+            </h1>
           </div>
-          <div className="flex items-center gap-4">
-            <NotificationCenter />
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div
+              className={`flex min-h-[44px] items-center gap-2 rounded-[var(--radius-control)] border px-3 text-sm ${
+                wrongNetwork
+                  ? 'border-[var(--warning)] bg-[var(--amber-muted)] text-[var(--text-strong)]'
+                  : 'border-[var(--border-muted)] bg-[var(--surface-subtle)] text-[var(--text)]'
+              }`}
+            >
+              {wrongNetwork ? (
+                <CircleAlert aria-hidden="true" className="h-4 w-4 text-[var(--warning)]" />
+              ) : (
+                <ShieldCheck aria-hidden="true" className="h-4 w-4 text-[var(--success)]" />
+              )}
+              <span>{chainName}</span>
+            </div>
             <ConnectButton />
           </div>
         </div>
 
-        {/* Quick Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-4 text-center">
-            <div className="text-2xl font-bold text-blue-400">{stats.totalTokensCreated}</div>
-            <div className="text-white/70 text-sm">Tokens Created</div>
+        <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="material-panel p-4">
+            <div className="flex items-center gap-3">
+              <WalletCards aria-hidden="true" className="h-5 w-5 text-[var(--primary)]" />
+              <p className="text-xs text-[var(--text-faint)]">Wallet</p>
+            </div>
+            <p className="mt-3 tabular-nums text-xl font-semibold text-[var(--text-strong)]">
+              {shortAddress(address)}
+            </p>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">
+              {isConnected ? 'Ready for booking actions' : 'Connect to load live positions'}
+            </p>
           </div>
-          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-4 text-center">
-            <div className="text-2xl font-bold text-green-400">{stats.activeTokens}</div>
-            <div className="text-white/70 text-sm">Active Tokens</div>
+
+          <div className="material-panel p-4">
+            <div className="flex items-center gap-3">
+              <Coins aria-hidden="true" className="h-5 w-5 text-[var(--primary)]" />
+              <p className="text-xs text-[var(--text-faint)]">TIME credits</p>
+            </div>
+            <p className="mt-3 tabular-nums text-xl font-semibold text-[var(--text-strong)]">
+              14.0 TIME
+            </p>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">Available for BookingManager</p>
           </div>
-          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-4 text-center">
-            <div className="text-2xl font-bold text-purple-400">{stats.totalTokensPurchased}</div>
-            <div className="text-white/70 text-sm">Purchased</div>
+
+          <div className="material-panel p-4">
+            <div className="flex items-center gap-3">
+              <BookOpen aria-hidden="true" className="h-5 w-5 text-[var(--primary)]" />
+              <p className="text-xs text-[var(--text-faint)]">Open bookings</p>
+            </div>
+            <p className="mt-3 tabular-nums text-xl font-semibold text-[var(--text-strong)]">
+              {bookingRows.length}
+            </p>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">Tracked outside the AMM pool</p>
           </div>
-          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-4 text-center">
-            <div className="text-2xl font-bold text-yellow-400">${stats.totalEarnings.toFixed(2)}</div>
-            <div className="text-white/70 text-sm">Earnings (USD)</div>
-          </div>
-          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-4 text-center">
-            <div className="text-2xl font-bold text-red-400">${stats.totalSpent.toFixed(2)}</div>
-            <div className="text-white/70 text-sm">Spent (USD)</div>
-          </div>
-          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-4 text-center">
-            <div className="text-2xl font-bold text-orange-400">{stats.completedServices}</div>
-            <div className="text-white/70 text-sm">Hours Completed</div>
+
+          <div className="material-panel p-4">
+            <div className="flex items-center gap-3">
+              <Layers3 aria-hidden="true" className="h-5 w-5 text-[var(--primary)]" />
+              <p className="text-xs text-[var(--text-faint)]">LP exposure</p>
+            </div>
+            <p className="mt-3 tabular-nums text-xl font-semibold text-[var(--text-strong)]">
+              $8.4k
+            </p>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">TIME/USDC preview position</p>
           </div>
         </div>
 
-        {/* Quick Actions */}
-        <div className="flex gap-4 mb-8">
-          {onCreateToken && (
-            <button
-              onClick={onCreateToken}
-              className="bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-600 hover:to-blue-600 text-white px-6 py-3 rounded-xl font-medium transition-all"
-            >
-              🚀 Create New Token
-            </button>
-          )}
-          {onViewMarketplace && (
-            <button
-              onClick={onViewMarketplace}
-              className="bg-white/20 hover:bg-white/30 text-white px-6 py-3 rounded-xl font-medium transition-all border border-white/30"
-            >
-              🏪 View Marketplace
-            </button>
-          )}
-        </div>
-
-        {/* Navigation Tabs */}
-        <div className="flex justify-center mb-8">
-          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-2 border border-white/20">
-            <div className="flex space-x-2">
-              {tabs.map((tab) => (
+        <div className="grid gap-4 xl:grid-cols-[1.45fr_0.9fr]">
+          <section className="material-panel min-w-0 p-4">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-faint)]">
+                  BookingManager
+                </p>
+                <h2 className="mt-1 text-lg font-semibold text-[var(--text-strong)]">
+                  Active booking state
+                </h2>
+              </div>
+              {onViewMarketplace && (
                 <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
-                  className={`px-4 py-2 rounded-xl font-medium transition-all ${activeTab === tab.id
-                    ? 'bg-white text-purple-600'
-                    : 'text-white hover:bg-white/10'
-                    }`}
+                  type="button"
+                  onClick={onViewMarketplace}
+                  className="flex min-h-[44px] items-center justify-center gap-2 rounded-[var(--radius-control)] border border-[var(--border-muted)] px-4 text-sm font-semibold text-[var(--text)] transition hover:border-[var(--border)] hover:bg-[var(--surface-raised)]"
                 >
-                  {tab.label}
+                  Open marketplace
+                  <ArrowRight aria-hidden="true" className="h-4 w-4" />
                 </button>
-              ))}
+              )}
             </div>
-          </div>
+
+            <div className="overflow-x-auto">
+              <div className="min-w-[760px]">
+                <div className="grid grid-cols-[1.15fr_0.6fr_0.55fr_0.65fr_0.7fr] gap-3 border-b border-[var(--border-muted)] pb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-faint)]">
+                  <span>Booking</span>
+                  <span>Status</span>
+                  <span>Hours</span>
+                  <span>Slot</span>
+                  <span>Settlement</span>
+                </div>
+                <div className="divide-y divide-[var(--border-muted)]">
+                  {bookingRows.map((booking) => (
+                    <div
+                      key={booking.id}
+                      className="grid grid-cols-[1.15fr_0.6fr_0.55fr_0.65fr_0.7fr] gap-3 py-4 text-sm"
+                    >
+                      <div>
+                        <p className="font-semibold text-[var(--text-strong)]">
+                          {booking.provider}
+                        </p>
+                        <p className="mt-1 tabular-nums text-xs text-[var(--text-faint)]">
+                          {booking.id}
+                        </p>
+                      </div>
+                      <span
+                        className={`inline-flex min-h-[28px] w-fit items-center rounded-md border px-2 text-xs font-semibold ${statusClass(
+                          booking.tone
+                        )}`}
+                      >
+                        {booking.status}
+                      </span>
+                      <span className="tabular-nums text-[var(--text)]">{booking.hours}</span>
+                      <span className="text-[var(--text)]">{booking.slot}</span>
+                      <span className="text-[var(--text-muted)]">{booking.settlement}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="transaction-sheet p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-faint)]">
+                  v4 readiness
+                </p>
+                <h2 className="mt-1 text-lg font-semibold text-[var(--text-strong)]">
+                  Pool and hook wiring
+                </h2>
+              </div>
+              <Activity aria-hidden="true" className="mt-1 h-5 w-5 text-[var(--primary)]" />
+            </div>
+
+            <div className="mt-4 space-y-3 text-sm">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[var(--text-muted)]">TIME token</span>
+                <span className="tabular-nums font-medium text-[var(--text-strong)]">
+                  {contractStatus(contracts.timeCreditToken)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[var(--text-muted)]">BookingManager</span>
+                <span className="tabular-nums font-medium text-[var(--text-strong)]">
+                  {contractStatus(contracts.bookingManager)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[var(--text-muted)]">TimePoolHook</span>
+                <span className="tabular-nums font-medium text-[var(--text-strong)]">
+                  {contractStatus(contracts.timePoolHook)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[var(--text-muted)]">Quote boundary</span>
+                <span className="font-medium text-[var(--text-strong)]">Hook checks only</span>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-[var(--radius-control)] border border-[var(--warning)] bg-[var(--amber-muted)] p-3 text-xs text-[var(--text)]">
+              Swaps can acquire TIME, but only BookingManager creates service rights and slot state.
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              {onCreateToken && (
+                <button
+                  type="button"
+                  onClick={onCreateToken}
+                  className="flex min-h-[44px] items-center justify-center gap-2 rounded-[var(--radius-control)] bg-[var(--primary)] px-3 text-sm font-bold text-[var(--background)] transition hover:bg-[var(--primary-pressed)]"
+                >
+                  <Plus aria-hidden="true" className="h-4 w-4" />
+                  Publish
+                </button>
+              )}
+              {onViewMarketplace && (
+                <button
+                  type="button"
+                  onClick={onViewMarketplace}
+                  className="flex min-h-[44px] items-center justify-center gap-2 rounded-[var(--radius-control)] border border-[var(--border-muted)] px-3 text-sm font-semibold text-[var(--text)] transition hover:border-[var(--border)] hover:bg-[var(--surface-raised)]"
+                >
+                  Book
+                  <CalendarClock aria-hidden="true" className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </section>
         </div>
 
-        {/* Tab Content */}
-        <motion.div
-          key={activeTab}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-        >
-          {activeTab === 'overview' && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* Portfolio Summary */}
-              <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-6 border border-white/20">
-                <h2 className="text-2xl font-bold text-white mb-6">📈 Portfolio Summary</h2>
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center">
-                    <span className="text-white/70">Total Portfolio Value:</span>
-                    <span className="text-white font-bold">${(stats.totalEarnings + stats.totalSpent).toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-white/70">Net Earnings:</span>
-                    <span className="text-green-400 font-bold">${(stats.totalEarnings - stats.totalSpent).toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-white/70">Active Revenue Streams:</span>
-                    <span className="text-white font-bold">{stats.activeTokens}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-white/70">Hours Monetized:</span>
-                    <span className="text-white font-bold">{stats.completedServices}h</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Recent Activity Preview */}
-              <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-6 border border-white/20">
-                <h2 className="text-2xl font-bold text-white mb-6">⚡ Recent Activity</h2>
-                <div className="space-y-3">
-                  {recentActivity.slice(0, 5).map((activity, index) => (
-                    <div key={activity.id} className="flex items-center gap-3 p-3 bg-white/5 rounded-xl">
-                      <div className="text-lg">
-                        {activity.type === 'token_created' ? '🎉' :
-                          activity.type === 'token_purchased' ? '💰' :
-                            activity.type === 'service_completed' ? '✅' :
-                              activity.type === 'payment_received' ? '💳' : '📬'}
-                      </div>
-                      <div className="flex-1">
-                        <div className="text-white text-sm font-medium">{activity.title}</div>
-                        <div className="text-white/60 text-xs">{formatActivityTime(activity.timestamp)}</div>
-                      </div>
-                    </div>
-                  ))}
-                  {recentActivity.length === 0 && (
-                    <div className="text-center py-4">
-                      <div className="text-white/60 text-sm">No recent activity</div>
-                    </div>
-                  )}
-                </div>
-              </div>
+        <section className="material-panel mt-4 p-4">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-faint)]">
+                Provider inventory
+              </p>
+              <h2 className="mt-1 text-lg font-semibold text-[var(--text-strong)]">
+                Redeemable hours and market depth
+              </h2>
             </div>
-          )}
+            <p className="text-sm text-[var(--text-muted)]">
+              AMM depth is informational; inventory caps redemption.
+            </p>
+          </div>
 
-          {activeTab === 'created' && (
-            <div className="space-y-6">
-              <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-bold text-white">🎨 Your Created Tokens</h2>
-                <div className="text-white/70">{createdTokens.length} tokens</div>
-              </div>
-
-              {createdTokens.length === 0 ? (
-                <div className="text-center py-16">
-                  <div className="text-6xl mb-4">🎨</div>
-                  <h3 className="text-2xl font-bold text-white mb-2">No Tokens Created Yet</h3>
-                  <p className="text-white/70 mb-6">Start monetizing your time by creating your first token</p>
-                  {onCreateToken && (
-                    <button
-                      onClick={onCreateToken}
-                      className="bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-600 hover:to-blue-600 text-white px-8 py-4 rounded-xl font-medium transition-all"
-                    >
-                      🚀 Create Your First Token
-                    </button>
-                  )}
+          <div className="grid gap-3 lg:grid-cols-3">
+            {inventoryRows.map((item) => (
+              <div
+                key={item.service}
+                className="rounded-[var(--radius-control)] border border-[var(--border-muted)] bg-[var(--surface-subtle)] p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <h3 className="font-semibold text-[var(--text-strong)]">{item.service}</h3>
+                  <span
+                    className={`inline-flex min-h-[28px] shrink-0 items-center rounded-md border px-2 text-xs font-semibold ${statusClass(
+                      item.tone
+                    )}`}
+                  >
+                    {item.status}
+                  </span>
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {createdTokens.map((token, index) => {
-                    const status = getTokenStatus(token);
-                    const soldHours = Number(token.totalHours) - Number(token.availableHours);
-                    const completionRate = (soldHours / Number(token.totalHours)) * 100;
-
-                    return (
-                      <motion.div
-                        key={token.tokenId}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: index * 0.1 }}
-                        className="bg-white/10 backdrop-blur-lg rounded-3xl p-6 border border-white/20"
-                      >
-                        <div className="flex justify-between items-start mb-4">
-                          <div>
-                            <h3 className="text-white font-bold text-lg mb-1">{token.serviceName}</h3>
-                            <p className="text-white/60 text-sm">Token #{token.tokenId}</p>
-                          </div>
-                          <div className={`px-3 py-1 rounded-full text-xs font-medium ${status.color}`}>
-                            {status.status}
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4 mb-4">
-                          <div>
-                            <div className="text-white/60 text-xs">Price/Hour</div>
-                            <div className="text-white font-bold">${formatPrice(token.pricePerHour)}</div>
-                          </div>
-                          <div>
-                            <div className="text-white/60 text-xs">Available</div>
-                            <div className="text-white font-bold">{token.availableHours.toString()}h</div>
-                          </div>
-                          <div>
-                            <div className="text-white/60 text-xs">Sold Hours</div>
-                            <div className="text-green-400 font-bold">{soldHours}h</div>
-                          </div>
-                          <div>
-                            <div className="text-white/60 text-xs">Valid Until</div>
-                            <div className="text-white font-bold">{formatValidUntil(token.validUntil)}</div>
-                          </div>
-                        </div>
-
-                        <div className="mb-4">
-                          <div className="flex justify-between text-white/60 text-xs mb-1">
-                            <span>Completion</span>
-                            <span>{completionRate.toFixed(1)}%</span>
-                          </div>
-                          <div className="w-full bg-white/20 rounded-full h-2">
-                            <div
-                              className="bg-gradient-to-r from-green-400 to-blue-500 h-2 rounded-full transition-all"
-                              style={{ width: `${completionRate}%` }}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="flex gap-2">
-                          {token.isActive && !isExpired(token.validUntil) && (
-                            <button
-                              onClick={() => handleDeactivateToken(token.tokenId)}
-                              className="flex-1 bg-red-500/20 hover:bg-red-500/30 text-red-400 py-2 px-4 rounded-xl text-sm font-medium transition-all"
-                            >
-                              Deactivate
-                            </button>
-                          )}
-                          <button 
-                            onClick={() => handleViewServiceDetails(token)}
-                            className="flex-1 bg-white/20 hover:bg-white/30 text-white py-2 px-4 rounded-xl text-sm font-medium transition-all"
-                          >
-                            View Details
-                          </button>
-                        </div>
-
-                        <div className="mt-3 text-center">
-                          <div className="text-green-400 font-bold">
-                            ${(soldHours * parseFloat(formatPrice(token.pricePerHour))).toFixed(2)} earned
-                          </div>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeTab === 'purchased' && (
-            <div className="space-y-6">
-              <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-bold text-white">🛒 Purchased Tokens</h2>
-                <div className="text-white/70">{purchasedTokens.length} tokens</div>
-              </div>
-
-              {purchasedTokens.length === 0 ? (
-                <div className="text-center py-16">
-                  <div className="text-6xl mb-4">🛒</div>
-                  <h3 className="text-2xl font-bold text-white mb-2">No Tokens Purchased Yet</h3>
-                  <p className="text-white/70 mb-6">Browse the marketplace to find professional services</p>
-                  {onViewMarketplace && (
-                    <button
-                      onClick={onViewMarketplace}
-                      className="bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-600 hover:to-blue-600 text-white px-8 py-4 rounded-xl font-medium transition-all"
-                    >
-                      🏪 Browse Marketplace
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {purchasedTokens.map((token, index) => (
-                    <motion.div
-                      key={token.tokenId}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.1 }}
-                      className="bg-white/10 backdrop-blur-lg rounded-3xl p-6 border border-white/20"
-                    >
-                      <div className="flex justify-between items-start mb-4">
-                        <div>
-                          <h3 className="text-white font-bold text-lg mb-1">{token.serviceName}</h3>
-                          <p className="text-white/60 text-sm">
-                            by {token.creator.slice(0, 6)}...{token.creator.slice(-4)}
-                          </p>
-                        </div>
-                        <div className={`px-3 py-1 rounded-full text-xs font-medium ${isExpired(token.validUntil) ? 'text-red-400 bg-red-500/20' : 'text-green-400 bg-green-500/20'
-                          }`}>
-                          {isExpired(token.validUntil) ? 'Expired' : 'Active'}
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4 mb-4">
-                        <div>
-                          <div className="text-white/60 text-xs">Price/Hour</div>
-                          <div className="text-white font-bold">${formatPrice(token.pricePerHour)}</div>
-                        </div>
-                        <div>
-                          <div className="text-white/60 text-xs">Hours Purchased</div>
-                          <div className="text-green-400 font-bold">
-                            {token.purchasedHours ? token.purchasedHours.toString() + 'h' : '0h'}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-white/60 text-xs">Valid Until</div>
-                          <div className="text-white font-bold">{formatValidUntil(token.validUntil)}</div>
-                        </div>
-                        <div>
-                          <div className="text-white/60 text-xs">Purchase Date</div>
-                          <div className="text-white font-bold">
-                            {token.purchaseTimestamp ? new Date(token.purchaseTimestamp).toLocaleDateString() : 'N/A'}
-                          </div>
-                        </div>
-                      </div>
-
-                      <button 
-                        onClick={() => handleViewServiceDetails(token)}
-                        className="w-full bg-white/20 hover:bg-white/30 text-white py-3 px-4 rounded-xl font-medium transition-all"
-                      >
-                        View Service Details
-                      </button>
-                    </motion.div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeTab === 'earnings' && (
-            <div className="space-y-8">
-              <h2 className="text-3xl font-bold text-white text-center">💰 Earnings Overview</h2>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-gradient-to-br from-green-500/20 to-green-700/20 backdrop-blur-lg rounded-3xl p-8 border border-green-500/30">
-                  <h3 className="text-green-400 font-bold text-2xl mb-4">Total Earnings</h3>
-                  <p className="text-white text-4xl font-bold mb-2">${stats.totalEarnings.toFixed(2)}</p>
-                  <p className="text-green-300">From {stats.completedServices} hours completed</p>
-                </div>
-
-                <div className="bg-gradient-to-br from-blue-500/20 to-blue-700/20 backdrop-blur-lg rounded-3xl p-8 border border-blue-500/30">
-                  <h3 className="text-blue-400 font-bold text-2xl mb-4">Average Rate</h3>
-                  <p className="text-white text-4xl font-bold mb-2">
-                    ${stats.completedServices > 0 ? (stats.totalEarnings / stats.completedServices).toFixed(2) : '0.00'}
-                  </p>
-                  <p className="text-blue-300">Per hour completed</p>
-                </div>
-
-                <div className="bg-gradient-to-br from-purple-500/20 to-purple-700/20 backdrop-blur-lg rounded-3xl p-8 border border-purple-500/30">
-                  <h3 className="text-purple-400 font-bold text-2xl mb-4">Active Revenue</h3>
-                  <p className="text-white text-4xl font-bold mb-2">{stats.activeTokens}</p>
-                  <p className="text-purple-300">Revenue streams</p>
-                </div>
-              </div>
-
-              <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 border border-white/20">
-                <h3 className="text-2xl font-bold text-white mb-6">💡 Earnings Optimization</h3>
-                <div className="space-y-4">
-                  <div className="flex items-center p-4 bg-white/5 rounded-2xl border border-white/10">
-                    <span className="text-2xl mr-4">📈</span>
-                    <div>
-                      <h4 className="text-white font-semibold">Increase Your Rates</h4>
-                      <p className="text-white/70 text-sm">Your completion rate is high - consider raising prices for new tokens</p>
-                    </div>
+                <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-[var(--text-faint)]">Available</p>
+                    <p className="tabular-nums font-semibold text-[var(--text-strong)]">
+                      {item.available}
+                    </p>
                   </div>
-                  <div className="flex items-center p-4 bg-white/5 rounded-2xl border border-white/10">
-                    <span className="text-2xl mr-4">🎯</span>
-                    <div>
-                      <h4 className="text-white font-semibold">Create More Tokens</h4>
-                      <p className="text-white/70 text-sm">Diversify your income streams with additional service offerings</p>
-                    </div>
+                  <div>
+                    <p className="text-xs text-[var(--text-faint)]">Booked</p>
+                    <p className="tabular-nums font-semibold text-[var(--text-strong)]">
+                      {item.booked}
+                    </p>
                   </div>
-                  <div className="flex items-center p-4 bg-white/5 rounded-2xl border border-white/10">
-                    <span className="text-2xl mr-4">⏰</span>
-                    <div>
-                      <h4 className="text-white font-semibold">Optimize Token Duration</h4>
-                      <p className="text-white/70 text-sm">Shorter validity periods can create urgency and increase sales</p>
-                    </div>
+                  <div>
+                    <p className="text-xs text-[var(--text-faint)]">Pool</p>
+                    <p className="tabular-nums font-semibold text-[var(--text-strong)]">
+                      {item.poolDepth}
+                    </p>
                   </div>
                 </div>
               </div>
-            </div>
-          )}
-
-          {activeTab === 'activity' && (
-            <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-white">📈 Activity Feed</h2>
-
-              {recentActivity.length === 0 ? (
-                <div className="text-center py-16">
-                  <div className="text-6xl mb-4">📈</div>
-                  <h3 className="text-2xl font-bold text-white mb-2">No Activity Yet</h3>
-                  <p className="text-white/70">Your recent transactions and activities will appear here</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {recentActivity.map((activity, index) => (
-                    <motion.div
-                      key={activity.id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.1 }}
-                      className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20"
-                    >
-                      <div className="flex items-start gap-4">
-                        <div className="text-3xl">
-                          {activity.type === 'token_created' ? '🎉' :
-                            activity.type === 'token_purchased' ? '💰' :
-                              activity.type === 'service_completed' ? '✅' :
-                                activity.type === 'payment_received' ? '💳' :
-                                  activity.type === 'token_expired' ? '⏰' :
-                                    activity.type === 'market_update' ? '📊' : '📬'}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex justify-between items-start mb-2">
-                            <h3 className="text-white font-bold">{activity.title}</h3>
-                            <span className="text-white/60 text-sm">{formatActivityTime(activity.timestamp)}</span>
-                          </div>
-                          <p className="text-white/80 mb-3">{activity.message}</p>
-                          <div className="flex justify-between items-center">
-                            <div className={`px-3 py-1 rounded-full text-xs font-medium ${activity.priority === 'urgent' ? 'text-red-400 bg-red-500/20' :
-                              activity.priority === 'high' ? 'text-orange-400 bg-orange-500/20' :
-                                activity.priority === 'medium' ? 'text-yellow-400 bg-yellow-500/20' :
-                                  'text-green-400 bg-green-500/20'
-                              }`}>
-                              {activity.priority} priority
-                            </div>
-                            {activity.actionLabel && activity.actionUrl && (
-                              <button className="text-blue-400 hover:text-blue-300 text-sm">
-                                {activity.actionLabel} →
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </motion.div>
+            ))}
+          </div>
+        </section>
       </div>
-
-      {/* Service Details Modal */}
-      <AnimatePresence>
-        {showTokenModal && selectedToken && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50"
-            onClick={handleCloseModal}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-gradient-to-br from-purple-500/20 to-blue-600/20 backdrop-blur-lg rounded-3xl p-8 border border-white/20 max-w-2xl w-full max-h-[80vh] overflow-y-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Modal Header */}
-              <div className="flex justify-between items-start mb-6">
-                <div>
-                  <h2 className="text-2xl font-bold text-white mb-2">{selectedToken.serviceName}</h2>
-                  <p className="text-white/60">Token #{selectedToken.tokenId}</p>
-                </div>
-                <button
-                  onClick={handleCloseModal}
-                  className="text-white/60 hover:text-white text-2xl"
-                >
-                  ✕
-                </button>
-              </div>
-
-              {/* Service Provider Info */}
-              <div className="bg-white/10 rounded-2xl p-6 mb-6">
-                <h3 className="text-white font-bold text-lg mb-4">🔹 Service Provider</h3>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-white/60">Creator Address:</span>
-                    <span className="text-white font-mono text-sm">
-                      {selectedToken.creator.slice(0, 6)}...{selectedToken.creator.slice(-4)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-white/60">Token Status:</span>
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                      !selectedToken.isActive ? 'text-gray-400 bg-gray-500/20' :
-                      isExpired(selectedToken.validUntil) ? 'text-red-400 bg-red-500/20' :
-                      Number(selectedToken.availableHours) === 0 ? 'text-yellow-400 bg-yellow-500/20' :
-                      'text-green-400 bg-green-500/20'
-                    }`}>
-                      {!selectedToken.isActive ? 'Deactivated' :
-                       isExpired(selectedToken.validUntil) ? 'Expired' :
-                       Number(selectedToken.availableHours) === 0 ? 'Sold Out' : 'Active'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Purchase Details or Performance Details */}
-              {selectedToken.purchasedHours !== undefined ? (
-                // Show purchase details for purchased tokens
-                <div className="bg-white/10 rounded-2xl p-6 mb-6">
-                  <h3 className="text-white font-bold text-lg mb-4">🛒 Your Purchase Details</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <div className="text-white/60 text-sm">Hours Purchased</div>
-                      <div className="text-green-400 font-bold text-xl">
-                        {selectedToken.purchasedHours ? selectedToken.purchasedHours.toString() + 'h' : '0h'}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-white/60 text-sm">Total Cost</div>
-                      <div className="text-white font-bold text-xl">
-                        ${selectedToken.purchasedHours ? 
-                          (Number(selectedToken.purchasedHours) * parseFloat(formatPrice(selectedToken.pricePerHour))).toFixed(2) : 
-                          '0.00'}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-white/60 text-sm">Purchase Date</div>
-                      <div className="text-white font-bold">
-                        {selectedToken.purchaseTimestamp ? 
-                          new Date(selectedToken.purchaseTimestamp).toLocaleDateString() : 
-                          'N/A'}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-white/60 text-sm">Valid Until</div>
-                      <div className="text-white font-bold">
-                        {formatValidUntil(selectedToken.validUntil)}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                // Show performance details for created tokens
-                <div className="bg-white/10 rounded-2xl p-6 mb-6">
-                  <h3 className="text-white font-bold text-lg mb-4">📊 Token Performance</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <div className="text-white/60 text-sm">Hours Sold</div>
-                      <div className="text-green-400 font-bold text-xl">
-                        {(Number(selectedToken.totalHours) - Number(selectedToken.availableHours))}h
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-white/60 text-sm">Total Earnings</div>
-                      <div className="text-white font-bold text-xl">
-                        ${((Number(selectedToken.totalHours) - Number(selectedToken.availableHours)) * parseFloat(formatPrice(selectedToken.pricePerHour))).toFixed(2)}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-white/60 text-sm">Creation Date</div>
-                      <div className="text-white font-bold">
-                        {new Date().toLocaleDateString()}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-white/60 text-sm">Completion Rate</div>
-                      <div className="text-white font-bold">
-                        {((Number(selectedToken.totalHours) - Number(selectedToken.availableHours)) / Number(selectedToken.totalHours) * 100).toFixed(1)}%
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Service Details */}
-              <div className="bg-white/10 rounded-2xl p-6 mb-6">
-                <h3 className="text-white font-bold text-lg mb-4">📋 Service Details</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <div className="text-white/60 text-sm">Price per Hour</div>
-                    <div className="text-white font-bold">${formatPrice(selectedToken.pricePerHour)}</div>
-                  </div>
-                  <div>
-                    <div className="text-white/60 text-sm">Total Hours Available</div>
-                    <div className="text-white font-bold">{selectedToken.totalHours.toString()}h</div>
-                  </div>
-                  <div>
-                    <div className="text-white/60 text-sm">Hours Remaining</div>
-                    <div className="text-white font-bold">{selectedToken.availableHours.toString()}h</div>
-                  </div>
-                  <div>
-                    <div className="text-white/60 text-sm">Hours Sold</div>
-                    <div className="text-green-400 font-bold">
-                      {(Number(selectedToken.totalHours) - Number(selectedToken.availableHours))}h
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Next Steps */}
-              <div className="bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-2xl p-6 border border-blue-500/30">
-                <h3 className="text-white font-bold text-lg mb-4">📞 Next Steps</h3>
-                <div className="space-y-3">
-                  {selectedToken.purchasedHours !== undefined ? (
-                    // Steps for purchased tokens
-                    <>
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl">💬</span>
-                        <div>
-                          <div className="text-white font-medium">Contact Service Provider</div>
-                          <div className="text-white/70 text-sm">
-                            Reach out to coordinate your {selectedToken.purchasedHours?.toString() || '0'} hours of service
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl">📅</span>
-                        <div>
-                          <div className="text-white font-medium">Schedule Your Sessions</div>
-                          <div className="text-white/70 text-sm">
-                            Plan how to use your purchased time before {formatValidUntil(selectedToken.validUntil)}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl">✅</span>
-                        <div>
-                          <div className="text-white font-medium">Service Completion</div>
-                          <div className="text-white/70 text-sm">
-                            Provider will mark hours as completed when service is delivered
-                          </div>
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    // Steps for created tokens
-                    <>
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl">📢</span>
-                        <div>
-                          <div className="text-white font-medium">Promote Your Service</div>
-                          <div className="text-white/70 text-sm">
-                            Share your token in the marketplace to attract buyers
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl">💼</span>
-                        <div>
-                          <div className="text-white font-medium">Deliver Quality Service</div>
-                          <div className="text-white/70 text-sm">
-                            Maintain high standards to build reputation and repeat business
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-2xl">📊</span>
-                        <div>
-                          <div className="text-white font-medium">Track Performance</div>
-                          <div className="text-white/70 text-sm">
-                            Monitor sales and adjust pricing or duration as needed
-                          </div>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Close Button */}
-              <div className="flex justify-center mt-6">
-                <button
-                  onClick={handleCloseModal}
-                  className="bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white px-8 py-3 rounded-xl font-medium transition-all"
-                >
-                  Close Details
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+    </main>
   );
 }

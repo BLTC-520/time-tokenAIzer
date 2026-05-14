@@ -1,5 +1,5 @@
 // constants.ts
-// Clean TokenizeAI Smart Contract Configuration
+// Time TokenAIzer Smart Contract Configuration
 
 // ===== CHAIN CONFIGURATION =====
 export const AVALANCHE_FUJI_CHAIN_ID = 43113;
@@ -7,7 +7,7 @@ export const BASE_SEPOLIA_CHAIN_ID = 84532;
 export const ETHEREUM_SEPOLIA_CHAIN_ID = 11155111;
 
 // ===== CONTRACT ADDRESSES =====
-// Time Token Contract Addresses (ERC-1155)
+// Legacy TimeTokenize contract addresses kept for the pre-v4 demo paths.
 export const TIME_TOKEN_CONTRACT_ADDRESSES = {
 	[ETHEREUM_SEPOLIA_CHAIN_ID]: "0xcEC74F686A7EEC2d818a1646996F3eDc9da890EA",
 	[BASE_SEPOLIA_CHAIN_ID]: "0xf38C634Eaa7af92762673FBa910b44E2DCB2282B",
@@ -30,6 +30,22 @@ export const KYC_CONTRACT_ADDRESSES = {
 export const DEFAULT_TIME_TOKEN_CONTRACT = TIME_TOKEN_CONTRACT_ADDRESSES[AVALANCHE_FUJI_CHAIN_ID];
 export const DEFAULT_GETSKILLPRICE_CONTRACT = GETSKILLPRICE_CONTRACT_ADDRESSES[AVALANCHE_FUJI_CHAIN_ID];
 export const KYC_CONTRACT_ADDRESS = KYC_CONTRACT_ADDRESSES.AVALANCHE_FUJI;
+
+const optionalAddress = (value: string | undefined): `0x${string}` =>
+	(value && value.startsWith('0x') ? value : '0x0000000000000000000000000000000000000000') as `0x${string}`;
+
+export const TIME_MARKET_CONTRACTS = {
+	[BASE_SEPOLIA_CHAIN_ID]: {
+		timeCreditToken: optionalAddress(process.env.NEXT_PUBLIC_TIME_CREDIT_TOKEN_BASE_SEPOLIA),
+		bookingManager: optionalAddress(process.env.NEXT_PUBLIC_BOOKING_MANAGER_BASE_SEPOLIA),
+		timePoolHook: optionalAddress(process.env.NEXT_PUBLIC_TIME_POOL_HOOK_BASE_SEPOLIA),
+		usdc: optionalAddress(process.env.NEXT_PUBLIC_USDC_BASE_SEPOLIA)
+	}
+} as const;
+
+export const getTimeMarketContracts = (chainId: number) => {
+	return TIME_MARKET_CONTRACTS[chainId as keyof typeof TIME_MARKET_CONTRACTS] || null;
+};
 
 // ===== NETWORK CONFIGURATION =====
 export const RPC_URLS = {
@@ -54,8 +70,7 @@ export const WEB3_CONFIG = {
 
 // ===== AI CONFIGURATION =====
 export const AI_CONFIG = {
-	GEMINI_API_KEY: process.env.NEXT_PUBLIC_GEMINI_API_KEY || "",
-	MODEL_NAME: "gemini-1.5-flash",
+	MODEL_NAME: "gpt-5.5",
 	MAX_TOKENS: 8192,
 	TEMPERATURE: 0.7
 } as const;

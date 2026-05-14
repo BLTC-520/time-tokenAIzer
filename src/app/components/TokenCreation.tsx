@@ -1,15 +1,21 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
+import {
+  ArrowLeft,
+  CalendarClock,
+  CheckCircle2,
+  CircleAlert,
+  Coins,
+  Layers3,
+  ShieldCheck,
+} from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { useAccount, useChainId } from 'wagmi';
-import { TokenSuggestion } from '../services/tokenizeAgent';
-import { getContractService, TokenCreationParams } from '../services/contractService';
-import { isSupportedChain, getChainDisplayName } from '../lib/wagmi';
-import { getAlertAgent } from '../services/alertAgent';
-import { validateTokenCreation } from '../utils/validation';
-import { useErrorHandler } from './ErrorBoundary';
-import { FEATURE_FLAGS } from '../shared/constants';
+import { getChainDisplayName } from '../lib/wagmi';
+import { getTimeMarketContracts } from '../shared/constants';
+import { isV4SupportedChainId } from '../shared/uniswapV4';
+import type { TokenSuggestion } from '../services/tokenizeAgent';
 
 interface TokenCreationProps {
   suggestion: TokenSuggestion;
@@ -17,543 +23,287 @@ interface TokenCreationProps {
   onCancel: () => void;
 }
 
+type PublishState = 'draft' | 'publishing' | 'published';
+
+const emptyContracts = {
+  timeCreditToken: '0x0000000000000000000000000000000000000000',
+  bookingManager: '0x0000000000000000000000000000000000000000',
+  timePoolHook: '0x0000000000000000000000000000000000000000',
+  usdc: '0x0000000000000000000000000000000000000000',
+} as const;
+
+function contractStatus(value: `0x${string}`) {
+  return value === '0x0000000000000000000000000000000000000000'
+    ? 'Not configured'
+    : `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
 export default function TokenCreation({ suggestion, onSuccess, onCancel }: TokenCreationProps) {
-  const { isConnected, address } = useAccount();
+  const { address, isConnected } = useAccount();
   const chainId = useChainId();
-  const [isCreating, setIsCreating] = useState(false);
-  const [currentStep, setCurrentStep] = useState(1);
-  const [customizations, setCustomizations] = useState({
-    serviceName: suggestion.serviceName,
-    pricePerHour: suggestion.suggestedPricePerHour,
-    totalHours: suggestion.suggestedTotalHours,
-    validityDays: suggestion.suggestedValidityDays
-  });
-  const [gasEstimate, setGasEstimate] = useState<string>('');
-  const [escrowEnabled, setEscrowEnabled] = useState(true); // Default to enabled for demo
-  const [escrowTimeoutDays, setEscrowTimeoutDays] = useState(FEATURE_FLAGS.ESCROW_TIMEOUT_DAYS);
-  
-  const contractService = getContractService();
-  const alertAgent = getAlertAgent();
-  const { captureError } = useErrorHandler();
+  const chainName = getChainDisplayName(chainId);
+  const wrongNetwork = !isV4SupportedChainId(chainId);
+  const contracts = getTimeMarketContracts(chainId) ?? emptyContracts;
+  const [publishState, setPublishState] = useState<PublishState>('draft');
+  const [serviceName, setServiceName] = useState(suggestion.serviceName);
+  const [hourlyRate, setHourlyRate] = useState(suggestion.suggestedPricePerHour);
+  const [availableHours, setAvailableHours] = useState(suggestion.suggestedTotalHours);
+  const [quoteWindowMinutes, setQuoteWindowMinutes] = useState(10);
+  const [validityDays, setValidityDays] = useState(suggestion.suggestedValidityDays);
 
-  useEffect(() => {
-    // Estimate gas cost when component loads
-    estimateGas();
-  }, []);
+  const estimatedInventoryValue = useMemo(
+    () => hourlyRate * availableHours,
+    [availableHours, hourlyRate]
+  );
 
-  const estimateGas = async () => {
-    try {
-      const cost = await contractService.estimateGasCost('create');
-      const formattedPrice = await contractService.formatPrice(cost);
-      setGasEstimate(formattedPrice.crypto); // Use the crypto amount as string
-    } catch (error) {
-      console.error('Failed to estimate gas:', error);
-      setGasEstimate('~0.001');
-    }
+  const primaryDisabled =
+    !isConnected || wrongNetwork || publishState === 'publishing' || publishState === 'published';
+
+  const handlePublish = () => {
+    if (primaryDisabled) return;
+
+    setPublishState('publishing');
+    window.setTimeout(() => {
+      setPublishState('published');
+      window.setTimeout(() => {
+        onSuccess(`provider-${Date.now()}`);
+      }, 700);
+    }, 900);
   };
-
-  const handleCustomizationChange = (field: string, value: string | number) => {
-    setCustomizations(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
-
-  const calculateTotalValue = () => {
-    return customizations.pricePerHour * customizations.totalHours;
-  };
-
-  const calculateDailyUtilization = () => {
-    return (customizations.totalHours / customizations.validityDays).toFixed(2);
-  };
-
-  const handleTokenCreationCancel = () => {
-    console.log('❌ Token creation cancelled');
-    
-    // Clean up component state before cancelling
-    setIsCreating(false);
-    setCurrentStep(1);
-    setGasEstimate('');
-    
-    // Reset customizations to original suggestion values
-    setCustomizations({
-      serviceName: suggestion.serviceName,
-      pricePerHour: suggestion.suggestedPricePerHour,
-      totalHours: suggestion.suggestedTotalHours,
-      validityDays: suggestion.suggestedValidityDays
-    });
-    
-    onCancel();
-  };
-
-  const handleCreateToken = async () => {
-    if (!isConnected || !address) {
-      alertAgent.addNotification({
-        type: 'system',
-        title: '❌ Wallet Not Connected',
-        message: 'Please connect your wallet to create tokens',
-        priority: 'high'
-      });
-      return;
-    }
-
-    if (!isSupportedChain(chainId)) {
-      alertAgent.addNotification({
-        type: 'system',
-        title: '❌ Unsupported Network',
-        message: 'Please switch to a supported testnet',
-        priority: 'high'
-      });
-      return;
-    }
-
-    try {
-      // Validate form data before proceeding
-      const validation = validateTokenCreation(customizations);
-      if (!validation.isValid) {
-        alertAgent.addNotification({
-          type: 'system',
-          title: '❌ Validation Error',
-          message: validation.errors.join(', '),
-          priority: 'medium'
-        });
-        return;
-      }
-
-      // Show warnings if any
-      if (validation.warnings.length > 0) {
-        alertAgent.addNotification({
-          type: 'system',
-          title: '⚠️ Warning',
-          message: validation.warnings.join(', '),
-          priority: 'low'
-        });
-      }
-
-      setIsCreating(true);
-      setCurrentStep(2);
-
-      const params: TokenCreationParams = {
-        serviceName: customizations.serviceName,
-        pricePerHour: customizations.pricePerHour,
-        totalHours: customizations.totalHours,
-        validityDays: customizations.validityDays
-      };
-
-      console.log('🚀 Creating token with params:', params);
-
-      const result = await contractService.createTimeToken(params);
-      
-      setCurrentStep(3);
-      
-      setTimeout(() => {
-        if (result.tokenId) {
-          onSuccess(result.tokenId);
-        }
-      }, 2000);
-
-    } catch (error) {
-      setIsCreating(false);
-      setCurrentStep(1); // Return to customization step
-      
-      // Handle user cancellation gracefully - no error logging
-      if (error instanceof Error && (error.message.includes('user rejected') || error.message.includes('User denied transaction') || error.message.includes('cancelled by user') || error.message.includes('rejected'))) {
-        console.log('🗙️ Token creation cancelled by user');
-        
-        alertAgent.addNotification({
-          type: 'system',
-          title: '⚠️ Token Creation Cancelled',
-          message: 'You can modify your token settings and try again.',
-          priority: 'medium'
-        });
-        
-        return; // Exit without logging error
-      }
-      
-      // Handle other errors (insufficient funds, network issues, etc.)
-      console.error('❌ Token creation failed:', error);
-      
-      let errorMessage = 'Token creation failed. Please try again.';
-      let errorTitle = '❌ Token Creation Failed';
-      
-      if (error instanceof Error) {
-        if (error.message.includes('insufficient funds') || error.message.includes('balance')) {
-          errorMessage = 'Insufficient balance for token creation and gas fees.';
-          errorTitle = '💰 Insufficient Funds';
-        } else if (error.message.includes('gas')) {
-          errorMessage = 'Transaction failed due to gas estimation issues.';
-          errorTitle = '⛽ Gas Error';
-        } else {
-          errorMessage = error.message;
-        }
-      }
-      
-      alertAgent.addNotification({
-        type: 'system',
-        title: errorTitle,
-        message: errorMessage,
-        priority: 'high'
-      });
-      
-      // Only capture non-cancellation errors for debugging
-      captureError(error as Error, {
-        action: 'createToken',
-        details: { customizations, chainId, address }
-      });
-    }
-  };
-
-  const steps = [
-    { id: 1, title: 'Customize Token', icon: '⚙️' },
-    { id: 2, title: 'Creating Token', icon: '⏳' },
-    { id: 3, title: 'Success!', icon: '🎉' }
-  ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-400 via-blue-500 to-purple-600 p-8">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
-            🎯 Create Your Time Token
-          </h1>
-          <p className="text-white/80 text-xl">
-            Transform your "{suggestion.serviceName}" service into a tradeable token
-          </p>
-        </div>
+    <main className="protocol-shell px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1180px]">
+        <div className="material-panel mb-4 flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-faint)]">
+              Provider setup
+            </p>
+            <h1 className="mt-1 text-[28px] font-semibold leading-tight text-[var(--text-strong)]">
+              Publish redeemable time inventory
+            </h1>
+          </div>
 
-        {/* Progress Steps */}
-        <div className="flex justify-center mb-8">
-          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-4 border border-white/20">
-            <div className="flex items-center space-x-8">
-              {steps.map((step, index) => (
-                <div key={step.id} className="flex items-center">
-                  <div className={`
-                    flex items-center justify-center w-12 h-12 rounded-full font-bold transition-all
-                    ${currentStep >= step.id 
-                      ? 'bg-green-500 text-white' 
-                      : currentStep === step.id 
-                        ? 'bg-blue-500 text-white' 
-                        : 'bg-white/20 text-white/60'
-                    }
-                  `}>
-                    {currentStep > step.id ? '✓' : step.icon}
-                  </div>
-                  <span className={`ml-3 font-medium ${
-                    currentStep >= step.id ? 'text-white' : 'text-white/60'
-                  }`}>
-                    {step.title}
-                  </span>
-                  {index < steps.length - 1 && (
-                    <div className={`w-16 h-0.5 mx-4 ${
-                      currentStep > step.id ? 'bg-green-500' : 'bg-white/20'
-                    }`} />
-                  )}
-                </div>
-              ))}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div
+              className={`flex min-h-[44px] items-center gap-2 rounded-[var(--radius-control)] border px-3 text-sm ${
+                wrongNetwork
+                  ? 'border-[var(--warning)] bg-[var(--amber-muted)] text-[var(--text-strong)]'
+                  : 'border-[var(--border-muted)] bg-[var(--surface-subtle)] text-[var(--text)]'
+              }`}
+            >
+              {wrongNetwork ? (
+                <CircleAlert aria-hidden="true" className="h-4 w-4 text-[var(--warning)]" />
+              ) : (
+                <ShieldCheck aria-hidden="true" className="h-4 w-4 text-[var(--success)]" />
+              )}
+              <span>{chainName}</span>
             </div>
+            <ConnectButton />
           </div>
         </div>
 
-        <AnimatePresence mode="wait">
-          {currentStep === 1 && (
-            <motion.div
-              key="customize"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="grid grid-cols-1 lg:grid-cols-2 gap-8"
-            >
-              {/* Customization Form */}
-              <div className="space-y-6">
-                <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-6 border border-white/20">
-                  <h2 className="text-2xl font-bold text-white mb-6">Customize Your Token</h2>
-                  
-                  <div className="space-y-4">
-                    {/* Service Name */}
-                    <div>
-                      <label className="block text-white/80 font-medium mb-2">Service Name</label>
-                      <input
-                        type="text"
-                        value={customizations.serviceName}
-                        onChange={(e) => handleCustomizationChange('serviceName', e.target.value)}
-                        className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/50 focus:outline-none focus:border-white/50"
-                        placeholder="Enter service name"
-                      />
-                    </div>
-
-                    {/* Price Per Hour */}
-                    <div>
-                      <label className="block text-white/80 font-medium mb-2">Price per Hour (USD)</label>
-                      <input
-                        type="number"
-                        value={customizations.pricePerHour}
-                        onChange={(e) => handleCustomizationChange('pricePerHour', parseFloat(e.target.value) || 0)}
-                        min="1"
-                        step="1"
-                        className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/50 focus:outline-none focus:border-white/50"
-                      />
-                    </div>
-
-                    {/* Total Hours */}
-                    <div>
-                      <label className="block text-white/80 font-medium mb-2">Total Hours</label>
-                      <input
-                        type="number"
-                        value={customizations.totalHours}
-                        onChange={(e) => handleCustomizationChange('totalHours', parseInt(e.target.value) || 0)}
-                        min="1"
-                        step="1"
-                        className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/50 focus:outline-none focus:border-white/50"
-                      />
-                    </div>
-
-                    {/* Validity Days */}
-                    <div>
-                      <label className="block text-white/80 font-medium mb-2">Validity Period (Days)</label>
-                      <input
-                        type="number"
-                        value={customizations.validityDays}
-                        onChange={(e) => handleCustomizationChange('validityDays', parseInt(e.target.value) || 0)}
-                        min="1"
-                        step="1"
-                        className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/50 focus:outline-none focus:border-white/50"
-                      />
-                    </div>
-
-                    {/* Escrow Protection (Feature Flag Demo) */}
-                    {FEATURE_FLAGS.ESCROW_ENABLED && (
-                      <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4">
-                        <div className="flex items-center justify-between mb-3">
-                          <label className="text-white/90 font-medium flex items-center gap-2">
-                            🔒 Escrow Protection
-                            <span className="bg-blue-500/20 text-blue-300 px-2 py-1 rounded-full text-xs font-bold">
-                              NEW
-                            </span>
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => setEscrowEnabled(!escrowEnabled)}
-                            className={`relative inline-flex items-center w-12 h-6 rounded-full transition-colors ${
-                              escrowEnabled ? 'bg-blue-500' : 'bg-white/20'
-                            }`}
-                          >
-                            <span
-                              className={`inline-block w-4 h-4 bg-white rounded-full transition-transform ${
-                                escrowEnabled ? 'translate-x-7' : 'translate-x-1'
-                              }`}
-                            />
-                          </button>
-                        </div>
-                        {escrowEnabled && (
-                          <div className="space-y-3">
-                            <p className="text-white/70 text-sm">
-                              💰 Buyer payments are held securely until service completion
-                            </p>
-                            <div>
-                              <label className="block text-white/80 text-sm mb-1">Escrow Timeout (Days)</label>
-                              <input
-                                type="number"
-                                value={escrowTimeoutDays}
-                                onChange={(e) => setEscrowTimeoutDays(parseInt(e.target.value) || 7)}
-                                min="1"
-                                max="30"
-                                className="w-24 bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-400"
-                              />
-                              <p className="text-white/50 text-xs mt-1">
-                                Payment auto-releases after {escrowTimeoutDays} days if no disputes
-                              </p>
-                            </div>
-                            <div className="bg-white/5 rounded-lg p-3">
-                              <h4 className="text-white/80 font-medium text-sm mb-2">🛡️ How Escrow Works:</h4>
-                              <div className="space-y-1 text-xs text-white/60">
-                                <div>1. Buyer payment held in smart contract</div>
-                                <div>2. Seller delivers the promised service</div>
-                                <div>3. Buyer confirms completion or auto-release</div>
-                                <div>4. Payment transferred to seller</div>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2 text-xs text-white/50">
-                              <span>💸</span>
-                              <span>Platform fee: {FEATURE_FLAGS.ESCROW_FEE_PERCENTAGE}% for escrow protection</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Network Status */}
-                <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-4 border border-white/20">
-                  <div className="flex justify-between items-center">
-                    <span className="text-white/80">Network:</span>
-                    <span className={`font-medium ${
-                      isSupportedChain(chainId) ? 'text-green-400' : 'text-red-400'
-                    }`}>
-                      {getChainDisplayName(chainId)}
-                      {isSupportedChain(chainId) ? ' ✓' : ' ⚠️'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center mt-2">
-                    <span className="text-white/80">Estimated Gas:</span>
-                    <span className="text-white font-medium">~{gasEstimate} ETH</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Preview & Summary */}
-              <div className="space-y-6">
-                <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-6 border border-white/20">
-                  <h3 className="text-xl font-bold text-white mb-4">Token Preview</h3>
-                  
-                  <div className="space-y-4">
-                    <div className="bg-white/5 rounded-2xl p-4">
-                      <h4 className="text-white font-semibold text-lg mb-2">{customizations.serviceName}</h4>
-                      <p className="text-white/70 text-sm mb-3">{suggestion.description}</p>
-                      
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <span className="text-white/60">Price/Hour:</span>
-                          <div className="text-white font-medium">${customizations.pricePerHour}</div>
-                        </div>
-                        <div>
-                          <span className="text-white/60">Total Hours:</span>
-                          <div className="text-white font-medium">{customizations.totalHours}h</div>
-                        </div>
-                        <div>
-                          <span className="text-white/60">Total Value:</span>
-                          <div className="text-green-400 font-bold">${calculateTotalValue()}</div>
-                        </div>
-                        <div>
-                          <span className="text-white/60">Valid For:</span>
-                          <div className="text-white font-medium">{customizations.validityDays} days</div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="bg-blue-500/20 rounded-xl p-3 text-center">
-                        <div className="text-blue-400 text-sm">Daily Utilization</div>
-                        <div className="text-white font-bold">{calculateDailyUtilization()}h/day</div>
-                      </div>
-                      <div className="bg-green-500/20 rounded-xl p-3 text-center">
-                        <div className="text-green-400 text-sm">Market Demand</div>
-                        <div className="text-white font-bold capitalize">{suggestion.marketDemand}</div>
-                      </div>
-                    </div>
-
-                    {/* Escrow Protection Preview */}
-                    {FEATURE_FLAGS.ESCROW_ENABLED && escrowEnabled && (
-                      <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4">
-                        <div className="flex items-center gap-2 mb-3">
-                          <span className="text-xl">🔒</span>
-                          <h4 className="text-white font-semibold">Escrow Protection Enabled</h4>
-                          <span className="bg-green-500/20 text-green-300 px-2 py-1 rounded-full text-xs font-bold">
-                            ✓ SECURED
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div>
-                            <span className="text-white/60">Protection Period:</span>
-                            <div className="text-white font-medium">{escrowTimeoutDays} days</div>
-                          </div>
-                          <div>
-                            <span className="text-white/60">Platform Fee:</span>
-                            <div className="text-white font-medium">{FEATURE_FLAGS.ESCROW_FEE_PERCENTAGE}%</div>
-                          </div>
-                        </div>
-                        <div className="mt-3 p-3 bg-white/5 rounded-lg">
-                          <p className="text-white/70 text-xs">
-                            💡 <strong>Buyer Advantage:</strong> Payments held safely until service completion.
-                            <br />
-                            🚀 <strong>Seller Advantage:</strong> Higher trust = more sales!
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* AI Insights */}
-                <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-4 border border-white/20">
-                  <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
-                    🤖 AI Insights
-                  </h4>
-                  <p className="text-white/80 text-sm">{suggestion.reasoning}</p>
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex gap-4">
-                  <button
-                    onClick={handleTokenCreationCancel}
-                    className="flex-1 bg-white/20 hover:bg-white/30 text-white py-4 px-6 rounded-xl font-medium transition-all border border-white/30"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleCreateToken}
-                    disabled={isCreating || !isConnected || !isSupportedChain(chainId)}
-                    className="flex-1 bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-600 hover:to-blue-600 disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed text-white py-4 px-6 rounded-xl font-medium transition-all shadow-lg"
-                  >
-                    {!isConnected ? 'Connect Wallet' : 
-                     !isSupportedChain(chainId) ? 'Switch Network' :
-                     'Create Token'}
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          )}
-
-          {currentStep === 2 && (
-            <motion.div
-              key="creating"
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="text-center"
-            >
-              <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-12 max-w-md mx-auto">
-                <div className="animate-spin rounded-full h-20 w-20 border-b-2 border-white mx-auto mb-6"></div>
-                <h2 className="text-2xl font-bold text-white mb-4">Creating Your Token</h2>
-                <p className="text-white/80 mb-6">
-                  Processing blockchain transaction...
+        <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
+          <section className="material-panel min-w-0 p-4">
+            <div className="mb-5 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-faint)]">
+                  BookingManager inventory
                 </p>
-                <div className="space-y-2 text-white/60 text-sm">
-                  <div>✓ Validating parameters</div>
-                  <div>✓ Submitting to blockchain</div>
-                  <div className="text-yellow-400">⏳ Waiting for confirmation...</div>
-                </div>
+                <h2 className="mt-1 text-lg font-semibold text-[var(--text-strong)]">
+                  Provider terms
+                </h2>
               </div>
-            </motion.div>
-          )}
+              <CalendarClock aria-hidden="true" className="mt-1 h-5 w-5 text-[var(--primary)]" />
+            </div>
 
-          {currentStep === 3 && (
-            <motion.div
-              key="success"
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="text-center"
-            >
-              <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-12 max-w-md mx-auto">
-                <div className="text-6xl mb-6">🎉</div>
-                <h2 className="text-3xl font-bold text-white mb-4">Token Created!</h2>
-                <p className="text-white/80 mb-6">
-                  Your "{customizations.serviceName}" token is now live on the blockchain
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="block md:col-span-2">
+                <span className="text-sm font-medium text-[var(--text)]">Service name</span>
+                <input
+                  value={serviceName}
+                  onChange={(event) => setServiceName(event.target.value)}
+                  className="mt-2 min-h-[44px] w-full rounded-[var(--radius-control)] border border-[var(--border-muted)] bg-[var(--surface-subtle)] px-3 text-[var(--text-strong)]"
+                />
+              </label>
+
+              <label className="block">
+                <span className="flex items-center justify-between gap-3 text-sm font-medium text-[var(--text)]">
+                  Hourly quote
+                  <span className="tabular-nums text-[var(--text-muted)]">${hourlyRate}/h</span>
+                </span>
+                <input
+                  type="range"
+                  min="50"
+                  max="900"
+                  step="10"
+                  value={hourlyRate}
+                  onChange={(event) => setHourlyRate(Number(event.target.value))}
+                  className="mt-3 w-full accent-[var(--primary)]"
+                />
+              </label>
+
+              <label className="block">
+                <span className="flex items-center justify-between gap-3 text-sm font-medium text-[var(--text)]">
+                  Redeemable inventory
+                  <span className="tabular-nums text-[var(--text-muted)]">{availableHours}h</span>
+                </span>
+                <input
+                  type="range"
+                  min="1"
+                  max="80"
+                  step="1"
+                  value={availableHours}
+                  onChange={(event) => setAvailableHours(Number(event.target.value))}
+                  className="mt-3 w-full accent-[var(--primary)]"
+                />
+              </label>
+
+              <label className="block">
+                <span className="flex items-center justify-between gap-3 text-sm font-medium text-[var(--text)]">
+                  Quote window
+                  <span className="tabular-nums text-[var(--text-muted)]">
+                    {quoteWindowMinutes}m
+                  </span>
+                </span>
+                <input
+                  type="range"
+                  min="5"
+                  max="30"
+                  step="1"
+                  value={quoteWindowMinutes}
+                  onChange={(event) => setQuoteWindowMinutes(Number(event.target.value))}
+                  className="mt-3 w-full accent-[var(--primary)]"
+                />
+              </label>
+
+              <label className="block">
+                <span className="flex items-center justify-between gap-3 text-sm font-medium text-[var(--text)]">
+                  Availability horizon
+                  <span className="tabular-nums text-[var(--text-muted)]">{validityDays}d</span>
+                </span>
+                <input
+                  type="range"
+                  min="7"
+                  max="120"
+                  step="1"
+                  value={validityDays}
+                  onChange={(event) => setValidityDays(Number(event.target.value))}
+                  className="mt-3 w-full accent-[var(--primary)]"
+                />
+              </label>
+            </div>
+
+            <div className="mt-5 rounded-[var(--radius-control)] border border-[var(--border-muted)] bg-[var(--surface-subtle)] p-4">
+              <p className="text-sm font-semibold text-[var(--text-strong)]">
+                GPT-5.5 rationale
+              </p>
+              <p className="mt-2 max-w-[72ch] text-sm leading-6 text-[var(--text-muted)]">
+                {suggestion.reasoning}
+              </p>
+            </div>
+          </section>
+
+          <section className="transaction-sheet p-4" aria-live="polite">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-faint)]">
+                  Publish preview
                 </p>
-                <div className="bg-green-500/20 rounded-xl p-4 mb-6">
-                  <div className="text-green-400 text-sm">Total Value</div>
-                  <div className="text-white font-bold text-2xl">${calculateTotalValue()}</div>
-                </div>
-                <p className="text-white/60 text-sm">
-                  Redirecting to marketplace...
-                </p>
+                <h2 className="mt-1 text-lg font-semibold text-[var(--text-strong)]">
+                  Credit market setup
+                </h2>
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+              <Coins aria-hidden="true" className="mt-1 h-5 w-5 text-[var(--primary)]" />
+            </div>
+
+            <div className="mt-4 space-y-3 text-sm">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[var(--text-muted)]">Wallet</span>
+                <span className="tabular-nums font-medium text-[var(--text-strong)]">
+                  {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Not connected'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[var(--text-muted)]">Inventory value</span>
+                <span className="tabular-nums font-medium text-[var(--text-strong)]">
+                  ${estimatedInventoryValue.toLocaleString()}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[var(--text-muted)]">TIME cap</span>
+                <span className="tabular-nums font-medium text-[var(--text-strong)]">
+                  {availableHours} TIME
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[var(--text-muted)]">BookingManager</span>
+                <span className="tabular-nums font-medium text-[var(--text-strong)]">
+                  {contractStatus(contracts.bookingManager)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[var(--text-muted)]">TimePoolHook</span>
+                <span className="tabular-nums font-medium text-[var(--text-strong)]">
+                  {contractStatus(contracts.timePoolHook)}
+                </span>
+              </div>
+            </div>
+
+            <div
+              className={`mt-4 rounded-[var(--radius-control)] border p-3 text-xs ${
+                publishState === 'published'
+                  ? 'border-[var(--success)] bg-[var(--jade-muted)] text-[var(--text-strong)]'
+                  : wrongNetwork || !isConnected
+                    ? 'border-[var(--warning)] bg-[var(--amber-muted)] text-[var(--text)]'
+                    : 'border-[var(--border-muted)] bg-[var(--surface-subtle)] text-[var(--text-muted)]'
+              }`}
+            >
+              <div className="flex items-start gap-2">
+                {publishState === 'published' ? (
+                  <CheckCircle2 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+                ) : (
+                  <CircleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+                )}
+                <span>
+                  {publishState === 'published'
+                    ? 'Inventory published. Redirecting to marketplace.'
+                    : wrongNetwork
+                      ? 'Switch to Sepolia or Base Sepolia before publishing inventory.'
+                      : 'Publishing creates provider inventory first; pool liquidity is initialized separately.'}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-start gap-2 rounded-[var(--radius-control)] border border-[var(--border-muted)] bg-[var(--surface-subtle)] p-3 text-xs text-[var(--text-muted)]">
+              <Layers3 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-[var(--primary)]" />
+              <p>
+                The hook may validate signed swap intent, but it never creates booking state.
+              </p>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={onCancel}
+                disabled={publishState === 'publishing'}
+                className="flex min-h-[44px] items-center justify-center gap-2 rounded-[var(--radius-control)] border border-[var(--border-muted)] px-3 text-sm font-semibold text-[var(--text)] transition hover:border-[var(--border)] hover:bg-[var(--surface-raised)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={handlePublish}
+                disabled={primaryDisabled}
+                className="min-h-[44px] rounded-[var(--radius-control)] bg-[var(--primary)] px-3 text-sm font-bold text-[var(--background)] transition hover:bg-[var(--primary-pressed)] disabled:cursor-not-allowed disabled:bg-[var(--surface-raised)] disabled:text-[var(--text-faint)]"
+              >
+                {publishState === 'publishing' ? 'Publishing' : 'Publish inventory'}
+              </button>
+            </div>
+          </section>
+        </div>
       </div>
-    </div>
+    </main>
   );
 }

@@ -2,6 +2,13 @@
 
 import { motion } from 'framer-motion';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
+import {
+  Bot,
+  BriefcaseBusiness,
+  CalendarClock,
+  ClipboardList,
+  WalletCards,
+} from 'lucide-react';
 import NotificationCenter from './NotificationCenter';
 import { localStorage_utils } from '../utils/localStorage';
 
@@ -17,11 +24,11 @@ export default function NavigationHeader({
   showNavigation = false
 }: NavigationHeaderProps) {
   const navigationSteps = [
-    { id: 'questionnaire', label: '📝 Questionnaire', icon: '📝' },
-    { id: 'portfolio', label: '📊 Portfolio', icon: '📊' },
-    { id: 'tokenization', label: '🤖 Agentic Mode', icon: '🤖' },
-    { id: 'marketplace', label: '🏪 Marketplace', icon: '🏪' },
-    { id: 'dashboard', label: '📈 Dashboard', icon: '📈' },
+    { id: 'questionnaire', label: 'Questionnaire', icon: ClipboardList },
+    { id: 'portfolio', label: 'Profile', icon: BriefcaseBusiness },
+    { id: 'tokenization', label: 'Agentic Mode', icon: Bot },
+    { id: 'marketplace', label: 'Book', icon: CalendarClock },
+    { id: 'dashboard', label: 'Portfolio', icon: WalletCards },
   ];
 
   const getStepStatus = (stepId: string) => {
@@ -47,7 +54,7 @@ export default function NavigationHeader({
       initial={{ opacity: 0, y: -50 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6 }}
-      className="fixed top-0 left-0 right-0 z-50 bg-black/20 backdrop-blur-lg border-b border-white/10"
+      className="fixed top-0 left-0 right-0 z-50 border-b border-[var(--border-muted)] bg-[var(--surface)] backdrop-blur-lg"
     >
       <div className="max-w-7xl mx-auto px-4 py-3">
         <div className="flex items-center justify-between">
@@ -56,10 +63,10 @@ export default function NavigationHeader({
             whileHover={{ scale: 1.05 }}
             className="flex items-center space-x-3"
           >
-            <div className="w-8 h-8 bg-gradient-to-r from-purple-400 to-blue-500 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold">⏰</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-control)] border border-[var(--primary)] bg-[var(--jade-muted)]">
+              <span className="text-sm font-bold text-[var(--text-strong)]">TT</span>
             </div>
-            <h1 className="text-white font-bold text-xl">Time Tokenizer</h1>
+            <h1 className="text-xl font-bold text-[var(--text-strong)]">Time Tokenizer</h1>
           </motion.div>
 
           {/* Navigation Steps */}
@@ -73,6 +80,7 @@ export default function NavigationHeader({
               {navigationSteps.map((step) => {
                 const status = getStepStatus(step.id);
                 const isClickable = status === 'completed' || status === 'current';
+                const Icon = step.icon;
 
                 return (
                   <motion.button
@@ -82,17 +90,17 @@ export default function NavigationHeader({
                     whileHover={isClickable ? { scale: 1.05 } : {}}
                     whileTap={isClickable ? { scale: 0.95 } : {}}
                     className={`
-                      px-4 py-2 rounded-lg font-medium text-sm transition-all
+                      flex min-h-[40px] items-center gap-2 rounded-[var(--radius-control)] px-4 py-2 text-sm font-medium transition-all
                       ${status === 'current'
-                        ? 'bg-white text-purple-600 shadow-lg'
+                        ? 'bg-[var(--primary)] text-[var(--background)] shadow-lg'
                         : status === 'completed'
-                          ? 'bg-green-500/20 text-green-300 hover:bg-green-500/30 cursor-pointer'
-                          : 'bg-white/10 text-white/50 cursor-not-allowed'
+                          ? 'bg-[var(--jade-muted)] text-[var(--text)] hover:bg-[var(--surface-raised)] cursor-pointer'
+                          : 'bg-[var(--surface-subtle)] text-[var(--text-faint)] cursor-not-allowed'
                       }
                     `}
                   >
-                    <span className="mr-2">{step.icon}</span>
-                    <span className="hidden lg:inline">{step.label.split(' ')[1] || step.label}</span>
+                    <Icon aria-hidden="true" className="h-4 w-4" />
+                    <span className="hidden lg:inline">{step.label}</span>
                   </motion.button>
                 );
               })}
@@ -112,12 +120,13 @@ export default function NavigationHeader({
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             transition={{ delay: 0.3, duration: 0.4 }}
-            className="md:hidden mt-3 pt-3 border-t border-white/10"
+            className="md:hidden mt-3 pt-3 border-t border-[var(--border-muted)]"
           >
             <div className="flex items-center justify-center space-x-2 overflow-x-auto">
               {navigationSteps.map((step) => {
                 const status = getStepStatus(step.id);
                 const isClickable = status === 'completed' || status === 'current';
+                const Icon = step.icon;
 
                 return (
                   <button
@@ -125,17 +134,17 @@ export default function NavigationHeader({
                     onClick={() => isClickable && onNavigate?.(step.id)}
                     disabled={!isClickable}
                     className={`
-                      flex flex-col items-center space-y-1 px-3 py-2 rounded-lg min-w-[80px] transition-all
+                      flex min-h-[56px] min-w-[80px] flex-col items-center justify-center gap-1 rounded-[var(--radius-control)] px-3 py-2 transition-all
                       ${status === 'current'
-                        ? 'bg-white text-purple-600'
+                        ? 'bg-[var(--primary)] text-[var(--background)]'
                         : status === 'completed'
-                          ? 'bg-green-500/20 text-green-300 hover:bg-green-500/30'
-                          : 'bg-white/10 text-white/50 cursor-not-allowed'
+                          ? 'bg-[var(--jade-muted)] text-[var(--text)] hover:bg-[var(--surface-raised)]'
+                          : 'bg-[var(--surface-subtle)] text-[var(--text-faint)] cursor-not-allowed'
                       }
                     `}
                   >
-                    <span className="text-lg">{step.icon}</span>
-                    <span className="text-xs font-medium">{step.label.split(' ')[1] || step.label}</span>
+                    <Icon aria-hidden="true" className="h-4 w-4" />
+                    <span className="text-xs font-medium">{step.label}</span>
                   </button>
                 );
               })}

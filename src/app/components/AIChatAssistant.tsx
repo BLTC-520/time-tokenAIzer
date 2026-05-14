@@ -73,11 +73,12 @@ export default function AIChatAssistant({ onStateChange, currentAppState }: AICh
       
       // Handle state changes if AI suggests them
       if (response.action && onStateChange) {
-        onStateChange(response.action);
+        const nextAction = response.action;
+        onStateChange(nextAction);
         
         // Add confirmation message
         setTimeout(() => {
-          addMessage(`Taking you to ${response.action.replace('_', ' ')}...`, 'assistant');
+          addMessage(`Taking you to ${nextAction.replace('_', ' ')}...`, 'assistant');
         }, 500);
       }
 

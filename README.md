@@ -1,186 +1,116 @@
 # Time TokenAIzer
 
-AI-powered platform that transforms skills into tradeable blockchain tokens using Chainlink Functions and Google Gemini.
+Time TokenAIzer is a Next.js marketplace for redeemable professional time credits. Creators publish limited service inventory, buyers acquire fungible `TIME` credits through a Uniswap v4 `TIME/USDC` pool, and confirmed bookings settle through first-party marketplace contracts.
 
-## Key Features
+The important boundary is deliberate: Uniswap v4 is the liquidity layer, not the booking marketplace. Booking state, quote validity, slot locking, cancellation, completion, and disputes belong to `BookingManager`.
 
-- **ElizaOS Integration** - AI agent runtime that monitors social signals and triggers token creation automatically
-- **Chainlink Functions Integration** - Decentralized skill market data fetching and KYC verification
-- **Google Gemini Agents** - AI-powered portfolio analysis and tokenization strategies  
-- **Smart Contract Tokenization** - ERC-1155 time tokens with automated pricing
-- **KYC-Gated Access** - Soulbound NFT verification system via Chainlink oracles
+## Current Refactor Direction
+
+- **GPT-5.5 server routes** replace browser-exposed Gemini and the unused Eliza agent package.
+- **ERC-20 TIME credits** replace the old ERC-1155 marketplace mental model for fungible hours.
+- **BookingManager** owns provider inventory, signed quotes, slot uniqueness, and booking lifecycle state.
+- **Uniswap v4 TIME/USDC pool** provides credit liquidity and price discovery.
+- **TimePoolHook** performs narrow pool-side checks for swap intent and emits telemetry; it does not book slots.
+- **Base Sepolia and Sepolia** are the primary Uniswap v4 integration targets. Avalanche Fuji remains legacy Chainlink/KYC demo support.
 
 ## Architecture
 
-### ElizaOS Pipeline
-
-- **Social Monitoring** - Listens to X (formerly Twitter) for skill/token requests
-- **Gemini AI Intent Parsing** - Extracts meaning and context from user posts
-- **Token Mint Trigger** - Initiates Chainlink Functions + smart contract calls
-- **Marketplace Sync** - Displays tokens in live marketplace instantly
-
-### Chainlink Functions Implementation
-- **GetSkillPrice.sol** - Fetches skill pricing data from Supabase via DON
-- **GetWalletKYC.sol** - Verifies KYC status and mints access NFTs
-- **DON Integration** - Avalanche Fuji testnet (`fun-avalanche-fuji-1`)
-- **Decentralized Data** - No centralized API dependencies in production
-
-### Chainlink Automation Implementation
-- **TokenExpirationAutomation.sol** - To perform upkeep on deactivating expired tokens every hour (CRON job)
-
-### Chainlink Price Feed 
-- **AVAX/USD** - Implementation Chainlink Price Feed for Marketplace USD to AVAX conversion
-  
-### Google Gemini AI Agents
-- **Portfolio Agent** - Analyzes user skills and generates market insights
-- **Tokenization Agent** - Creates optimal token strategies based on market data
-- **Alert Agent** - Real-time transaction notifications and updates
-
-### Smart Contract Architecture
-```solidity
-// Chainlink Functions for market data
-function sendRequest() external returns (bytes32 requestId) {
-    FunctionsRequest.Request memory req;
-    req.initializeRequestForInlineJavaScript(source);
-    return _sendRequest(req.encodeCBOR(), subscriptionId, gasLimit, donID);
-}
-
-// KYC verification with NFT minting
-function requestKYCVerification() external {
-    // Query Supabase via Chainlink Functions
-    // Mint soulbound KYC NFT on verification
-}
+```text
+Frontend marketplace
+  -> BookingManager
+  -> TimeCreditToken
+  -> Uniswap v4 TIME/USDC pool
+  -> TimePoolHook
 ```
 
-## Installation
+Core flow:
 
-### Prerequisites
+1. Connect wallet.
+2. Complete access checks.
+3. Generate a GPT-assisted skill and inventory profile.
+4. Register provider inventory.
+5. Acquire `TIME` credits through a v4 pool, or use existing credits.
+6. Book a slot with a signed quote through `BookingManager`.
+7. `BookingManager` burns or locks the required `TIME` and records booking state.
+
+See [PRODUCT.md](./PRODUCT.md), [DESIGN.md](./DESIGN.md), and [docs/architecture/uniswap-v4-time-marketplace.md](./docs/architecture/uniswap-v4-time-marketplace.md) for the product, design, and protocol context.
+See [docs/security/time-pool-hook-review.md](./docs/security/time-pool-hook-review.md) and [docs/runbooks/testnet-booking-flow.md](./docs/runbooks/testnet-booking-flow.md) for the hook security checklist and Base Sepolia demo flow.
+
+## Repository Layout
+
+| Area | Role |
+| --- | --- |
+| `src/app/` | Next.js App Router UI and route handlers |
+| `src/app/api/ai/` | Server-side OpenAI route handlers |
+| `src/app/services/` | Client service wrappers for AI, booking, contracts, and v4 swap preparation |
+| `src/app/shared/uniswapV4.ts` | Uniswap v4 deployment constants |
+| `src/app/types/` | Shared portfolio and time-market types |
+| `contracts/src/` | Time credit, booking, mock token, and security-first v4 hook contracts |
+| `docs/superpowers/plans/` | Refactor implementation plan |
+
+## Environment
+
 ```bash
-Node.js 18+
-npm or yarn
-```
+# Server-side AI only. Do not expose this with NEXT_PUBLIC_.
+OPENAI_API_KEY=your-openai-api-key
+OPENAI_MODEL=gpt-5.5
 
-### Environment Setup
-```bash
-# AI Configuration
-NEXT_PUBLIC_GEMINI_API_KEY=your-gemini-api-key
-
-# Web3 Configuration  
+# Wallet UI
 NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=your-walletconnect-id
 
-# Chainlink Functions
+# Local development only. Enables the "Grant Dev KYC Access" button.
+NEXT_PUBLIC_DEV_KYC_BYPASS=false
+
+# Legacy Chainlink Functions / KYC demo support
 CHAINLINK_SUBSCRIPTION_ID=15603
 CHAINLINK_SECRETS_SLOT_ID=0
 CHAINLINK_SECRETS_VERSION=1750362435
+CHAINLINK_DON_ID=fun-avalanche-fuji-1
 ```
 
-### Quick Start
+## Install And Run
+
 ```bash
-git clone <repository-url>
-cd time-tokenizer
 npm install
 npm run dev
 ```
 
-## ElizaOS Integration
+The default Next.js dev URL is [http://localhost:3000](http://localhost:3000).
 
-ElizaOS acts as the **intelligent middleware** that bridges social activity with on-chain execution.
+To bypass KYC locally for development, set `NEXT_PUBLIC_DEV_KYC_BYPASS=true` in `.env.local`, restart `npm run dev`, connect a wallet, then click **Grant Dev KYC Access** on the KYC screen. The bypass is ignored in production builds.
 
-### 🔍 Social Monitoring
-ElizaOS continuously listens to user intent on **X (formerly Twitter)** via keyword detection or structured prompts.
+## Verification
 
-### 🧠 Intent Parsing & AI Analysis
-Using **Google Gemini agents**, ElizaOS extracts meaningful requests (e.g., skill offers, token ideas) from tweets in real time.
+```bash
+npx tsc --noEmit --pretty false
+npm run build
+```
 
-### ⚙️ Automated Token Creation  
-Upon valid intent detection, ElizaOS performs the following actions:
+The current build succeeds. WalletConnect may still print a non-fatal `indexedDB is not defined` warning during static generation because it probes browser storage while Next prerenders.
 
-- 📡 **Triggers Chainlink Functions** to fetch relevant skill pricing from **Supabase**  
-- 🔗 **Calls smart contracts** (e.g., `TimeToken`) to mint an **ERC-1155** token  
-- 🛒 **Displays the newly created token** instantly on the **marketplace**
+## Contract Workspace
 
-### 🛍️ Marketplace Display
-All tokens generated by ElizaOS appear in the **live token marketplace**, enriched with:
+The contract workspace lives in `contracts/`. The repo includes npm-installed Solidity dependencies for OpenZeppelin and Uniswap v4, plus a `solc` compile fallback for environments without Foundry:
 
-- Metadata generated by **Gemini AI**
-- Real-time pricing data via **Chainlink oracles**
+```bash
+npm run contracts:compile
+npm run contracts:compile:tests
+```
 
----
+For execution-level tests and gas snapshots, install Foundry and run:
 
-This enables a **zero-friction, trustless pipeline** from:
+```bash
+cd contracts
+forge test
+forge snapshot --match-contract TimePoolHookTest --skip script
+```
 
-`Social Signal → Token Creation → Marketplace Listing`  
-— all without human intervention.
+This local workspace has been verified with Foundry `1.7.1`; the current suite passes `20` tests. The `--skip script` flag is used for the snapshot because the npm-distributed `forge-std` package has an older `Vm` interface than modern deployment scripts expect.
 
+## Security Posture
 
-## User Flow
-
-1. **Connect Wallet** - RainbowKit integration with multi-chain support
-2. **KYC Verification** - Chainlink Functions verify identity via Supabase
-3. **Skill Assessment** - Google Gemini analyzes expertise and market demand
-4. **Token Strategy** - AI generates optimal tokenization recommendations
-5. **Smart Contract Deployment** - Automated ERC-1155 token creation
-6. **Marketplace** - Trade tokens with real-time Chainlink pricing data
-
-## Technical Highlights
-
-### Chainlink Functions Usage
-- **Subscription ID**: 15603 (Avalanche Fuji)
-- **DON Secrets**: Encrypted Supabase credentials stored on-chain
-- **Gas Optimization**: 300k callback limit with efficient data parsing
-- **Error Handling**: Comprehensive fallback systems for oracle failures
-
-### Google Gemini Integration
-- **Model**: Gemini 1.5 Flash for portfolio analysis
-- **Structured Output**: JSON-validated AI responses
-- **Rate Limiting**: Intelligent API usage optimization
-- **Fallback System**: Offline generation when API unavailable
-
-### Security Features
-- **Soulbound KYC NFTs** - Non-transferable access tokens
-- **Input Validation** - Comprehensive data sanitization
-- **Rate Limiting** - API abuse prevention
-- **Error Boundaries** - Graceful failure handling
-
-## Smart Contracts
-
-### Deployed Contracts (Avalanche Fuji)
-- **GetSkillPrice**: Market data oracle
-  > `https://github.com/BLTC-520/time-tokenAIzer/blob/main/src/app/artifacts/GetSkillprice.sol#L27-L60`
-- **GetWalletKYC**: KYC verification and NFT minting
-  > `https://github.com/BLTC-520/time-tokenAIzer/blob/main/src/app/artifacts/GetWalletKYC.sol#L179-L206`
-  > `https://github.com/BLTC-520/time-tokenAIzer/blob/main/src/app/artifacts/GetWalletKYC.sol#L116-L141`
-- **TokenExpirationAutomation**: Chainlink Automation time-based upkeep
-  > `https://github.com/BLTC-520/time-tokenAIzer/blob/main/src/app/artifacts/TokenExpirationAutomation.sol#L86-L105`
-
-## Tech Stack
-
-- **Frontend**: Next.js 15, TypeScript, Tailwind CSS, Framer Motion
-- **Web3**: Wagmi, Viem, RainbowKit, Ethers.js
-- **AI**: Google Gemini 1.5 Flash API
-- **Blockchain**: Chainlink Functions, ERC-1155, Avalanche
-- **Database**: Supabase (accessed via Chainlink Functions)
-
-## Demo
-
-Access the live application at `http://localhost:3001` after setup.
-
-### Key Demo Features
-- Real Chainlink Functions data fetching
-- Live Google Gemini AI processing
-- Smart contract token creation
-- KYC verification with NFT minting
-- Multi-chain marketplace functionality
-
-## Hackathon Differentiators
-
-1. **Full Chainlink Functions Integration** - Not just price feeds, but custom data fetching and KYC verification
-2. **Multi-Agent AI System** - Three specialized Google Gemini agents working in coordination
-3. **Decentralized KYC** - Soulbound NFTs for access control via Chainlink oracles
-4. **Real Market Application** - Practical time tokenization with actual economic utility
-
----
-
-**Built for TokenizeAI Hackathon** - Showcasing advanced Chainlink Functions integration with Google Gemini AI
-
-🔗 **Chainlink Functions** | 🤖 **Google Gemini** | elizaOS 
+- The hook never creates bookings.
+- `hookData` buyer and quote intent must be validated, because hook `sender` is usually a router.
+- Signed quote validity is delegated to `BookingManager`.
+- Fixed booking quote terms are separate from AMM execution price and slippage.
+- Creator/platform fee hooks are deferred until invariant tests cover accounting and refunds.

@@ -1,7 +1,7 @@
 'use client';
 
-import { PortfolioData } from './elizaAgent';
-import { UserAnswers } from '../utils/localStorage';
+import type { PortfolioData } from '../types/portfolio';
+import type { UserAnswers } from '../utils/localStorage';
 
 export interface TokenSuggestion {
   id: string;
@@ -72,11 +72,7 @@ export interface AgenticAnalysis {
 }
 
 export class TokenizeAgent {
-  private apiKey: string;
-
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
-  }
+  constructor(_apiKey?: string) {}
 
   async analyzePortfolioForTokenization(
     portfolioData: PortfolioData,
@@ -86,7 +82,7 @@ export class TokenizeAgent {
       console.log('🤖 TokenizeAgent: Analyzing portfolio for optimal tokenization...');
 
       const analysisPrompt = this.buildTokenizationPrompt(portfolioData, userAnswers);
-      const response = await this.callGeminiAPI(analysisPrompt);
+      const response = await this.callOpenAIAPI(analysisPrompt, 'tokenization');
 
       const plan = this.parseTokenizationResponse(response);
 
@@ -107,13 +103,11 @@ export class TokenizeAgent {
     try {
       console.log('🎯 TokenizeAgent: Analyzing goal for agentic token bundles...');
       console.log('Goal:', goal);
-      console.log('API Key available:', !!this.apiKey);
-
       const goalAnalysis = this.parseGoal(goal);
       const agenticPrompt = this.buildAgenticPrompt(goal, goalAnalysis, portfolioData, userAnswers);
 
-      console.log('🤖 Calling Gemini API for agentic analysis...');
-      const response = await this.callGeminiAPI(agenticPrompt);
+      console.log('🤖 Calling server-side GPT API for agentic analysis...');
+      const response = await this.callOpenAIAPI(agenticPrompt, 'agentic');
       console.log('📡 Received AI response, parsing...');
 
       const analysis = this.parseAgenticResponse(response, goalAnalysis);
@@ -375,40 +369,29 @@ Focus on creating 3-5 high-quality token suggestions that maximize revenue while
     `;
   }
 
-  private async callGeminiAPI(prompt: string): Promise<string> {
-    console.log('🔑 TokenizeAgent calling Gemini API with key length:', this.apiKey?.length);
-
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + this.apiKey, {
+  private async callOpenAIAPI(prompt: string, task: 'tokenization' | 'agentic'): Promise<string> {
+    const response = await fetch('/api/ai/tokenization', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: prompt
-          }]
-        }],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 2048,
-        }
+        task,
+        prompt,
       })
     });
 
-    console.log('📡 Gemini API response status:', response.status);
+    console.log('📡 GPT API response status:', response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('❌ Gemini API error details:', errorText);
-      throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+      console.error('❌ GPT API error details:', errorText);
+      throw new Error(`GPT API error: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
-    console.log('✅ Gemini API response received');
-    return data.candidates[0].content.parts[0].text;
+    console.log('✅ GPT API response received');
+    return data.text;
   }
 
   private parseTokenizationResponse(response: string): TokenizationPlan {

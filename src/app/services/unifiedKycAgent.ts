@@ -542,7 +542,7 @@ export class UnifiedKYCAgent {
     }
 
     /**
-     * Auto-trigger KYC verification when wallet connects (ElizaOS style)
+     * Auto-trigger KYC verification when wallet connects
      */
     async autoVerifyOnConnect(walletAddress: string): Promise<KYCResult> {
         return this.verifyKYC(walletAddress);

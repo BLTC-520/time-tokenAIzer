@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { PortfolioData } from '../services/elizaAgent';
+import type { PortfolioData } from '../types/portfolio';
 import { UserAnswers } from '../utils/localStorage';
 import { TokenSuggestion } from '../services/tokenizeAgent';
 import TokenizationPlan from './TokenizationPlan';

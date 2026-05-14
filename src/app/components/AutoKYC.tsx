@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAccount } from 'wagmi';
 import { getUnifiedKYCAgent, KYCResult, KYCEventCallbacks } from '../services/unifiedKycAgent';
+import { isDevKycBypassEnabled } from '../shared/devMode';
 
 interface AutoKYCProps {
   onAccessGranted?: () => void;
@@ -66,6 +67,37 @@ export default function AutoKYC({ onAccessGranted, onKYCComplete, enableAutoTrig
 
   const kycAgent = getUnifiedKYCAgent();
   const flowInitiatedForAddressRef = useRef<string | null>(null);
+
+  const grantDevAccess = useCallback(() => {
+    if (!address || !isDevKycBypassEnabled) return;
+
+    const devResult: KYCResult = {
+      success: true,
+      tokenId: 1,
+      contractAddress: 'dev-mode',
+      hasExistingNFT: true,
+    };
+
+    setIsProcessing(false);
+    setCurrentStep('access-granted');
+    setTokenId(1);
+    setResult(devResult);
+    flowInitiatedForAddressRef.current = null;
+    kycAgent.resetProcessingState();
+    setSteps((prev) =>
+      prev.map((step) => ({
+        ...step,
+        status: 'completed',
+        details:
+          step.id === 'access-granted'
+            ? 'Development bypass granted. No database, Chainlink, or NFT minting was executed.'
+            : 'Skipped by development KYC bypass.',
+      }))
+    );
+
+    onKYCComplete?.(devResult);
+    onAccessGranted?.();
+  }, [address, kycAgent, onAccessGranted, onKYCComplete]);
 
   const updateStepStatus = useCallback((stepId: string, status: KYCStep['status'], details?: string) => {
     setSteps(prev => prev.map(step =>
@@ -177,6 +209,11 @@ export default function AutoKYC({ onAccessGranted, onKYCComplete, enableAutoTrig
 
   const triggerKYCFlow = useCallback(async (walletAddress: string) => {
     console.log('🚀 triggerKYCFlow called for:', walletAddress);
+
+    if (isDevKycBypassEnabled) {
+      grantDevAccess();
+      return;
+    }
 
     if (flowInitiatedForAddressRef.current === walletAddress) {
       console.log('⚠️ KYC flow already initiated for this wallet, skipping duplicate call.');
@@ -335,9 +372,13 @@ export default function AutoKYC({ onAccessGranted, onKYCComplete, enableAutoTrig
       setIsProcessing(false);
       flowInitiatedForAddressRef.current = null;
     }
-  }, [updateStepStatus, setCurrentStep, onAccessGranted, kycAgent, currentStep]);
+  }, [updateStepStatus, setCurrentStep, onAccessGranted, kycAgent, currentStep, grantDevAccess]);
 
   useEffect(() => {
+    if (isDevKycBypassEnabled) {
+      return;
+    }
+
     if (isConnected && address && enableAutoTrigger && flowInitiatedForAddressRef.current !== address) {
       if (!isProcessing && !kycAgent.getStatus().isProcessing) {
         console.log('🎯 Auto-triggering KYC for new address:', address);
@@ -380,11 +421,27 @@ export default function AutoKYC({ onAccessGranted, onKYCComplete, enableAutoTrig
     >
       <div className="text-center mb-6">
         <h2 className="text-2xl font-bold mb-2 text-gray-800">🤖 Auto-KYC Agent</h2>
-        <p className="text-gray-700">ElizaOS-style automatic KYC verification</p>
+        <p className="text-gray-700">Automatic wallet-based KYC verification</p>
         <p className="text-sm text-gray-600 mt-2 font-mono">
           Wallet: {address?.substring(0, 6)}...{address?.substring(address.length - 4)}
         </p>
       </div>
+
+      {isDevKycBypassEnabled && (
+        <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-900">
+          <h3 className="font-semibold">Development KYC bypass enabled</h3>
+          <p className="mt-1 text-sm">
+            This skips database, Chainlink, and NFT checks locally only. Production builds ignore this bypass.
+          </p>
+          <button
+            type="button"
+            onClick={grantDevAccess}
+            className="mt-3 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-700"
+          >
+            Grant Dev KYC Access
+          </button>
+        </div>
+      )}
 
       {/* KYC Steps Progress */}
       <div className="space-y-4 mb-6">
@@ -541,13 +598,17 @@ export default function AutoKYC({ onAccessGranted, onKYCComplete, enableAutoTrig
               🔄 Waiting for NFT Minting...
             </div>
           </div>
-        ) : !isProcessing ? (
+        ) : !isProcessing && !isDevKycBypassEnabled ? (
           <button
             onClick={() => triggerKYCFlow(address!)}
             className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
             🚀 Start Auto-KYC Verification
           </button>
+        ) : !isProcessing && isDevKycBypassEnabled ? (
+          <div className="px-6 py-3 bg-amber-100 text-amber-900 rounded-lg border border-amber-300">
+            Use the development bypass button above to continue.
+          </div>
         ) : (
           <div className="px-6 py-3 bg-gray-400 text-white rounded-lg cursor-not-allowed">
             🔄 Processing KYC...

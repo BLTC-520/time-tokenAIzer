@@ -1,6 +1,4 @@
 // AI Assistant agent for Time Tokenizer platform
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
 interface AssistantContext {
   userAddress?: string;
   isConnected: boolean;
@@ -42,22 +40,13 @@ const assistantCharacter = {
 };
 
 class AIAssistantAgent {
-  private genAI: GoogleGenerativeAI | null = null;
-  private model: any = null;
   private isInitialized = false;
 
   async initialize() {
     if (this.isInitialized) return;
 
     try {
-      const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-      if (apiKey) {
-        this.genAI = new GoogleGenerativeAI(apiKey);
-        this.model = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-        console.log('🤖 AI Assistant initialized with Gemini AI');
-      } else {
-        console.warn('⚠️ No Gemini API key found, using rule-based responses');
-      }
+      console.log('🤖 AI Assistant initialized with server-side GPT route');
       this.isInitialized = true;
     } catch (error) {
       console.error('❌ Failed to initialize AI Assistant:', error);
@@ -75,12 +64,7 @@ class AIAssistantAgent {
       return actionResponse;
     }
 
-    // Use AI if available, otherwise use rule-based responses
-    if (this.model) {
-      return await this.generateAIResponse(context);
-    } else {
-      return this.generateRuleBasedResponse(context);
-    }
+    return await this.generateAIResponse(context);
   }
 
   private checkForActions(context: AssistantContext): AssistantResponse | null {
@@ -169,11 +153,21 @@ Respond in a conversational, helpful tone.
 `;
 
     try {
-      const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
+      const response = await fetch('/api/ai/assistant', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ context, prompt }),
+      });
 
-      return { text };
+      if (!response.ok) {
+        throw new Error(`Assistant API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      return { text: data.text };
     } catch (error) {
       console.error('❌ Error with AI response:', error);
       return this.generateRuleBasedResponse(context);

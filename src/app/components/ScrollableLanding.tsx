@@ -166,8 +166,8 @@ const CallToActionCode = () => {
         {`// Your journey starts here
 const future = await tokenizeTime({
   you: "skilled_professional",
-  blockchain: "avalanche",
-  ai: "gemini_pro",
+  liquidity: "uniswap_v4",
+  ai: "gpt_5_5",
   result: "financial_freedom"
 });
 
@@ -391,8 +391,8 @@ console.log(\`Token created: \${timeToken.id}\`);
                 title="AI-Powered Portfolio"
                 description="Advanced AI agents analyze your skills and create personalized tokenization strategies using LLM technology."
                 code={`// AI Agent analyzing your profile
-const agent = new ElizaAgent({
-  model: "gemini-pro",
+const agent = new GPTPortfolioAgent({
+  model: "gpt-5.5",
   expertise: userAnswers.skills,
   goal: "optimize_tokenization"
 });
@@ -406,20 +406,20 @@ const strategy = await agent.generateStrategy({
 
               <TechFeature
                 icon="⛓️"
-                title="Multi-Chain Support"
-                description="Deploy time tokens across multiple blockchains with ERC-1155 standards for maximum compatibility."
-                code={`// Deploy across multiple chains
-const chains = [
-  { name: "Avalanche", id: 43113 },
-  { name: "Ethereum", id: 11155111 },
-  { name: "Base", id: 84532 }
-];
+                title="Uniswap v4 Liquidity"
+                description="Use ERC-20 TIME credits, BookingManager inventory, and v4 TIME/USDC liquidity as separate protocol layers."
+                code={`// Route through the credit market
+const bookingIntent = {
+  providerId,
+  hoursWad,
+  quoteId,
+  buyer
+};
 
-await Promise.all(
-  chains.map(chain => 
-    deployToken(tokenData, chain.id)
-  )
-);`}
+await swapAndBookRouter.swapThenBook({
+  pool: "TIME/USDC",
+  hookData: encodeHookData(bookingIntent)
+});`}
               />
 
               <TechFeature

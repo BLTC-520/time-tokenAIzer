@@ -1,5 +1,5 @@
 // Local Storage Utility Functions for Time Tokenizer
-import { PortfolioData } from '../services/elizaAgent';
+import type { PortfolioData } from '../types/portfolio';
 
 // Types for localStorage data
 export interface UserAnswers {
@@ -39,7 +39,7 @@ export interface SessionData {
   completedQuestionnaireStep: number;
   lastActivity: number;
   version: string; // for data migration
-  geminiApiKey?: string; // Optional Gemini API key for AI services
+  legacyBrowserAiKey?: string; // Deprecated: browser AI keys are no longer used
   kycVerified: boolean; // KYC verification status
   kycResult: any | null; // KYC verification result
   hasReachedDashboard?: boolean; // Whether user has reached dashboard at least once
@@ -53,16 +53,25 @@ const STORAGE_KEYS = {
   BOOKING_DATA: 'timeTokenizer_bookings',
 } as const;
 
-// Session timeout (24 hours)Purchase failed. Please try again.
+// Session timeout (24 hours)
 const SESSION_TIMEOUT = 24 * 60 * 60 * 1000;
 const CURRENT_VERSION = '1.0.0';
 
 // Utility functions
 const isLocalStorageAvailable = (): boolean => {
+  if (
+    typeof window === 'undefined' ||
+    typeof window.localStorage === 'undefined' ||
+    typeof window.localStorage.getItem !== 'function' ||
+    typeof window.localStorage.setItem !== 'function'
+  ) {
+    return false;
+  }
+
   try {
     const test = '__localStorage_test__';
-    localStorage.setItem(test, test);
-    localStorage.removeItem(test);
+    window.localStorage.setItem(test, test);
+    window.localStorage.removeItem(test);
     return true;
   } catch {
     return false;
