@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useAccount } from 'wagmi';
 import { getUnifiedKYCAgent, KYCResult, KYCStatus } from '../services/unifiedKycAgent';
+import { isDevKycBypassEnabled } from '../shared/devMode';
 
 interface KYCVerificationProps {
   onVerificationComplete?: (result: KYCResult) => void;
@@ -18,6 +19,22 @@ export default function KYCVerification({ onVerificationComplete, onStatusUpdate
   const [error, setError] = useState<string | null>(null);
 
   const kycAgent = getUnifiedKYCAgent();
+
+  const grantDevKycAccess = () => {
+    const status: KYCStatus = { hasAccess: true, kycLevel: 1 };
+    const result: KYCResult = {
+      success: true,
+      tokenId: 1,
+      contractAddress: 'dev-mode',
+      hasExistingNFT: true,
+    };
+
+    setKycStatus(status);
+    setVerificationResult(result);
+    setError(null);
+    onStatusUpdate?.(status);
+    onVerificationComplete?.(result);
+  };
 
   useEffect(() => {
     if (isConnected && address) {
@@ -85,6 +102,22 @@ export default function KYCVerification({ onVerificationComplete, onStatusUpdate
       className="max-w-md mx-auto p-6 bg-white rounded-lg shadow-lg"
     >
       <h2 className="text-2xl font-bold text-center mb-6">KYC Verification</h2>
+
+      {isDevKycBypassEnabled && (
+        <div className="mb-4 rounded border border-amber-300 bg-amber-50 p-4 text-amber-900">
+          <h3 className="font-semibold">Development KYC bypass enabled</h3>
+          <p className="mt-1 text-sm">
+            This grants local-only access without database, Chainlink, or NFT checks.
+          </p>
+          <button
+            type="button"
+            onClick={grantDevKycAccess}
+            className="mt-3 w-full rounded bg-amber-600 px-4 py-2 text-white hover:bg-amber-700"
+          >
+            Grant Dev KYC Access
+          </button>
+        </div>
+      )}
       
       <div className="mb-4">
         <p className="text-sm text-gray-600 mb-2">Wallet Address:</p>

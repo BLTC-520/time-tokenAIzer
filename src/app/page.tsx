@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useChainId } from 'wagmi';
 import ImprovedQuestionnaire from './components/ImprovedQuestionnaire';
 import ProcessingState from './components/ProcessingState';
@@ -9,7 +8,7 @@ import Portfolio from './components/Portfolio';
 import ChainSwitcher from './components/ChainSwitcher';
 import ScrollableLanding from './components/ScrollableLanding';
 import AutoKYC from './components/AutoKYC';
-import { PortfolioData } from './services/geminiPortfolioAgent';
+import type { PortfolioData } from './types/portfolio';
 import TokenizationModeSelector from './components/TokenizationModeSelector';
 import TokenCreation from './components/TokenCreation';
 import Marketplace from './components/Marketplace';
@@ -17,6 +16,7 @@ import Dashboard from './components/Dashboard';
 import ClientOnly from './components/ClientOnly';
 import NavigationHeader from './components/NavigationHeader';
 import AIChatAssistant from './components/AIChatAssistant';
+import HowToUseGuide from './components/HowToUseGuide';
 import { TokenSuggestion } from './services/tokenizeAgent';
 import { useTimeTokenizerStorage } from './hooks/useLocalStorage';
 import { UserAnswers, getKYCStatus, saveKYCStatus, clearKYCStatus, localStorage_utils } from './utils/localStorage';
@@ -264,6 +264,15 @@ export default function Home() {
   const currentAppState = storage.appState.appState;
   const userAnswers = storage.userAnswers.userAnswers;
   const portfolioData = storage.portfolio.portfolioData;
+  const guideAvailableStates = Array.from(new Set([
+    currentAppState,
+    'landing',
+    ...(isConnected ? ['kyc_verification'] : []),
+    ...(kycVerified ? ['questionnaire', 'marketplace', 'dashboard'] : []),
+    ...(userAnswers ? ['processing'] : []),
+    ...(userAnswers && portfolioData ? ['portfolio', 'tokenization'] : []),
+    ...(selectedTokenSuggestion ? ['token_creation'] : []),
+  ]));
 
   return (
     <ClientOnly fallback={
@@ -294,22 +303,24 @@ export default function Home() {
         )}
 
         {currentAppState === 'landing' && (
-          <ScrollableLanding
-            onGetStarted={() => {
-              // Trigger state transition based on stored data
-              if (portfolioData) {
-                storage.appState.updateAppState('portfolio');
-              } else if (userAnswers) {
-                storage.appState.updateAppState('processing');
-              } else {
-                storage.appState.updateAppState('questionnaire');
-              }
-            }}
-          />
+          <div data-guide-id="start">
+            <ScrollableLanding
+              onGetStarted={() => {
+                // Trigger state transition based on stored data
+                if (portfolioData) {
+                  storage.appState.updateAppState('portfolio');
+                } else if (userAnswers) {
+                  storage.appState.updateAppState('processing');
+                } else {
+                  storage.appState.updateAppState('questionnaire');
+                }
+              }}
+            />
+          </div>
         )}
 
         {currentAppState === 'kyc_verification' && (
-          <div className="pt-20">
+          <div className="pt-20" data-guide-id="kyc">
             <AutoKYC
               onAccessGranted={handleKYCAccessGranted}
               onKYCComplete={handleKYCComplete}
@@ -319,13 +330,13 @@ export default function Home() {
         )}
 
         {currentAppState === 'questionnaire' && (
-          <div className="pt-20">
+          <div className="pt-20" data-guide-id="questionnaire">
             <ImprovedQuestionnaire onComplete={handleQuestionnaireComplete} />
           </div>
         )}
 
         {currentAppState === 'processing' && userAnswers && (
-          <div className="pt-20">
+          <div className="pt-20" data-guide-id="profile">
             <ProcessingState
               userAnswers={userAnswers}
               onComplete={handleProcessingComplete}
@@ -334,7 +345,7 @@ export default function Home() {
         )}
 
         {currentAppState === 'portfolio' && userAnswers && portfolioData && (
-          <div className="pt-20">
+          <div className="pt-20" data-guide-id="profile">
             <Portfolio
               userAnswers={userAnswers}
               portfolioData={portfolioData}
@@ -344,7 +355,7 @@ export default function Home() {
         )}
 
         {currentAppState === 'tokenization' && userAnswers && portfolioData && (
-          <div className="pt-20">
+          <div className="pt-20" data-guide-id="strategy">
             <TokenizationModeSelector
               userAnswers={userAnswers}
               portfolioData={portfolioData}
@@ -357,7 +368,7 @@ export default function Home() {
         )}
 
         {currentAppState === 'token_creation' && selectedTokenSuggestion && (
-          <div className="pt-20">
+          <div className="pt-20" data-guide-id="publish">
             <TokenCreation
               suggestion={selectedTokenSuggestion}
               onSuccess={handleTokenCreationSuccess}
@@ -367,7 +378,7 @@ export default function Home() {
         )}
 
         {currentAppState === 'marketplace' && (
-          <div className="pt-20">
+          <div className="pt-20" data-guide-id="marketplace">
             <Marketplace
               onCreateToken={handleCreateTokenFromMarketplace}
               onViewDashboard={handleViewDashboard}
@@ -376,7 +387,7 @@ export default function Home() {
         )}
 
         {currentAppState === 'dashboard' && (
-          <div className="pt-20">
+          <div className="pt-20" data-guide-id="dashboard">
             <Dashboard
               onCreateToken={handleCreateTokenFromMarketplace}
               onViewMarketplace={handleViewMarketplace}
@@ -394,6 +405,13 @@ export default function Home() {
             onStateChange={handleHeaderNavigation}
           />
         )}
+
+        <HowToUseGuide
+          currentState={currentAppState}
+          availableStates={guideAvailableStates}
+          isWalletConnected={isConnected}
+          onNavigate={handleHeaderNavigation}
+        />
       </div>
     </ClientOnly>
   );

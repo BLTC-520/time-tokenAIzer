@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { elizaPortfolioAgent, PortfolioData } from '../services/geminiPortfolioAgent';
+import { portfolioAgent } from '../services/openaiPortfolioAgent';
+import type { PortfolioData } from '../types/portfolio';
 
 interface UserAnswers {
   name: string;
@@ -41,13 +42,13 @@ export default function ProcessingState({ userAnswers, onComplete }: ProcessingS
         setCompletedSteps(prev => [...prev, i]);
       }
       
-      // Final step: Actually generate portfolio with ElizaOS
+      // Final step: generate portfolio through the server-side GPT route.
       setCurrentStep(processingSteps.length - 1);
       setIsGeneratingPortfolio(true);
       
       try {
-        console.log('🤖 Initializing Google Gemini Portfolio Agent...');
-        const portfolioData = await elizaPortfolioAgent.generatePortfolio(userAnswers);
+        console.log('🤖 Initializing GPT Portfolio Agent...');
+        const portfolioData = await portfolioAgent.generatePortfolio(userAnswers);
         console.log('✅ Portfolio generated successfully:', portfolioData);
         
         setCompletedSteps(prev => [...prev, processingSteps.length - 1]);
@@ -243,8 +244,8 @@ export default function ProcessingState({ userAnswers, onComplete }: ProcessingS
                 ⚡
               </motion.div>
               <span>
-                {isGeneratingPortfolio 
-                  ? "Google Gemini Agent is analyzing your profile..." 
+                {isGeneratingPortfolio
+                  ? "GPT Portfolio Agent is analyzing your profile..."
                   : "AI Portfolio Agent is working..."
                 }
               </span>

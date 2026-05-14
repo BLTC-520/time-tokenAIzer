@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TokenizeAgent, type TokenizationPlan, TokenSuggestion } from '../services/tokenizeAgent';
-import { PortfolioData } from '../services/elizaAgent';
+import type { PortfolioData } from '../types/portfolio';
 import { UserAnswers } from '../utils/localStorage';
 import { useTimeTokenizerStorage } from '../hooks/useLocalStorage';
 
@@ -35,33 +35,16 @@ export default function TokenizationPlan({
       setIsLoading(true);
       console.log('🔄 Starting tokenization analysis...');
 
-      // Get Gemini API key from environment variables or session
-      const sessionData = storage.session.sessionData;
-      const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-      
-      console.log('🔑 API Key check:', {
-        envKey: !!process.env.NEXT_PUBLIC_GEMINI_API_KEY,
-        sessionKey: !!sessionData?.geminiApiKey,
-        finalKey: !!apiKey,
-        keyLength: apiKey?.length
-      });
-
-      if (!apiKey) {
-        console.warn('⚠️ No Gemini API key found, using fallback plan');
-        throw new Error('Gemini API key not found');
-      }
-
-      // Always create agent (it will handle missing API key gracefully)
-      const agent = new TokenizeAgent(apiKey);
+      const agent = new TokenizeAgent();
       const tokenizationPlan = await agent.analyzePortfolioForTokenization(portfolioData, userAnswers);
       
       setPlan(tokenizationPlan);
       setCurrentStep('suggestions');
     } catch (error) {
       console.error('❌ Tokenization analysis failed:', error);
-      // Use fallback plan with empty API key
+      // Use fallback plan if server-side AI is unavailable
       try {
-        const agent = new TokenizeAgent('');
+        const agent = new TokenizeAgent();
         const fallbackPlan = await agent.analyzePortfolioForTokenization(portfolioData, userAnswers);
         setPlan(fallbackPlan);
         setCurrentStep('suggestions');

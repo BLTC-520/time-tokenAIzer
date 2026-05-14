@@ -1,54 +1,9 @@
-// ElizaOS-style agent implementation with real AI integration
-import { GoogleGenerativeAI } from '@google/generative-ai';
+// Client-side portfolio agent facade. GPT execution happens in Next API routes.
+import type { PortfolioData, UserAnswers } from '../types/portfolio';
 
-interface UserAnswers {
-  name: string;
-  experience: string;
-  skills: string[];
-  timeAvailable: string;
-  goals: string;
-  preferredProjects: string[];
-  hourlyRate: string;
-}
-
-interface PortfolioData {
-  profileSummary: string;
-  skillAssessment: Array<{
-    skill: string;
-    level: number;
-    marketDemand: number;
-    insights: string;
-  }>;
-  projectRecommendations: Array<{
-    name: string;
-    description: string;
-    match: number;
-    estimatedBudget: string;
-    duration: string;
-    requiredSkills: string[];
-  }>;
-  earningsProjection: {
-    weekly: number;
-    monthly: number;
-    yearly: number;
-    optimizationTips: string[];
-  };
-  timeOptimization: {
-    bestWorkingHours: string;
-    productivityTips: string[];
-    timeManagementAdvice: string;
-  };
-  careerRoadmap: {
-    shortTerm: string[];
-    mediumTerm: string[];
-    longTerm: string[];
-  };
-}
-
-// ElizaOS-style Portfolio Maker Character Configuration
 const portfolioMakerConfig = {
-  name: "Portfolio Maker",
-  identity: "An expert AI agent specialized in creating personalized time tokenization portfolios and career optimization strategies.",
+  name: "GPT Portfolio Maker",
+  identity: "An expert AI agent specialized in creating personalized time tokenization portfolios and booking-aware time market strategies.",
   expertise: [
     "Expert in freelance market analysis and career optimization",
     "Specialized in Web3, blockchain, and emerging technology careers", 
@@ -65,38 +20,20 @@ const portfolioMakerConfig = {
   ]
 };
 
-class ElizaPortfolioAgent {
+class PortfolioAgent {
   private isInitialized = false;
-  private genAI: GoogleGenerativeAI | null = null;
-  private model: any = null;
 
   async initialize() {
     if (this.isInitialized) return;
 
     try {
-      console.log('🤖 Initializing ElizaOS Portfolio Maker Agent with Real AI...');
+      console.log('🤖 Initializing GPT Portfolio Maker Agent...');
       console.log(`Agent Identity: ${portfolioMakerConfig.identity}`);
       console.log(`Agent Expertise: ${portfolioMakerConfig.expertise.length} areas`);
-      
-      // Initialize Gemini AI
-      const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-      console.log('🔑 ElizaAgent API Key check:', {
-        envKey: !!process.env.NEXT_PUBLIC_GEMINI_API_KEY,
-        keyLength: apiKey?.length
-      });
-      
-      if (apiKey) {
-        this.genAI = new GoogleGenerativeAI(apiKey);
-        this.model = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-        console.log('🧠 Gemini AI model loaded successfully');
-      } else {
-        console.warn('⚠️ No Gemini API key found, falling back to intelligent simulation');
-      }
-      
       this.isInitialized = true;
-      console.log('✅ ElizaOS Portfolio Maker Agent initialized successfully');
+      console.log('✅ GPT Portfolio Maker Agent initialized successfully');
     } catch (error) {
-      console.error('❌ Failed to initialize ElizaOS agent:', error);
+      console.error('❌ Failed to initialize portfolio agent:', error);
       throw error;
     }
   }
@@ -106,21 +43,13 @@ class ElizaPortfolioAgent {
       await this.initialize();
     }
 
-    console.log('🔍 ElizaOS Agent analyzing user profile...');
+    console.log('🔍 GPT Portfolio Agent analyzing user profile...');
     console.log(`Analyzing ${userAnswers.name}'s skills: ${userAnswers.skills.join(', ')}`);
     
     try {
-      // Try real AI generation with Gemini if available
-      if (this.model) {
-        console.log('🧠 ElizaOS Agent using Gemini AI for portfolio analysis...');
-        return await this.generateAIPortfolio(userAnswers);
-      } else {
-        console.log('🧠 ElizaOS Agent using intelligent rule-based analysis...');
-        return this.generateIntelligentPortfolio(userAnswers);
-      }
-      
+      return await this.generateAIPortfolio(userAnswers);
     } catch (error) {
-      console.error('❌ Error generating portfolio with ElizaOS:', error);
+      console.error('❌ Error generating portfolio with GPT:', error);
       console.log('🔄 Falling back to intelligent simulation...');
       return this.generateFallbackPortfolio(userAnswers);
     }
@@ -128,7 +57,7 @@ class ElizaPortfolioAgent {
 
   private async generateAIPortfolio(userAnswers: UserAnswers): Promise<PortfolioData> {
     const prompt = `
-You are the Portfolio Maker, an expert ElizaOS agent specialized in creating personalized time tokenization portfolios and career optimization strategies.
+You are the Portfolio Maker, an expert GPT agent specialized in creating personalized time tokenization portfolios and career optimization strategies.
 
 Your identity: ${portfolioMakerConfig.identity}
 
@@ -199,32 +128,32 @@ Provide detailed, market-aware insights based on 2024 freelance market condition
 `;
 
     try {
-      console.log('🤖 ElizaOS Agent querying Gemini AI...');
-      const result = await this.model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-      
-      console.log('📝 Raw AI response received, parsing...');
-      
-      // Extract JSON from the response
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const portfolioData = JSON.parse(jsonMatch[0]);
-        console.log('✅ AI-generated portfolio parsed successfully');
-        return portfolioData;
-      } else {
-        throw new Error('Could not extract JSON from AI response');
+      console.log('🤖 Portfolio Agent requesting server-side GPT analysis...');
+      const response = await fetch('/api/ai/portfolio', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userAnswers, prompt }),
+      });
+
+      if (!response.ok) {
+        const details = await response.text();
+        throw new Error(`Portfolio API error: ${response.status} - ${details}`);
       }
-      
+
+      const portfolioData = await response.json();
+      console.log('✅ GPT-generated portfolio parsed successfully');
+      return portfolioData;
     } catch (error) {
-      console.error('❌ Error with Gemini AI generation:', error);
+      console.error('❌ Error with GPT portfolio generation:', error);
       console.log('🔄 Switching to intelligent simulation...');
       return this.generateIntelligentPortfolio(userAnswers);
     }
   }
 
   private generateIntelligentPortfolio(userAnswers: UserAnswers): PortfolioData {
-    // ElizaOS-style intelligent analysis based on agent expertise
+    // Local deterministic analysis keeps the demo usable without server AI credentials.
     const isWeb3Focused = userAnswers.skills.some(skill => 
       ['blockchain', 'ai', 'fullstack', 'frontend'].includes(skill)
     );
@@ -538,5 +467,5 @@ Provide detailed, market-aware insights based on 2024 freelance market condition
   }
 }
 
-export const elizaPortfolioAgent = new ElizaPortfolioAgent();
+export const portfolioAgent = new PortfolioAgent();
 export type { PortfolioData, UserAnswers };

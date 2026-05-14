@@ -1,5 +1,6 @@
-import { getDefaultConfig } from '@rainbow-me/rainbowkit';
 import { mainnet, polygon, optimism, arbitrum, base, sepolia, baseSepolia } from 'wagmi/chains';
+import { createConfig, http } from 'wagmi';
+import { injected, metaMask } from 'wagmi/connectors';
 import { defineChain } from 'viem';
 import { 
   TIME_TOKEN_CONTRACT_ADDRESSES, 
@@ -97,9 +98,21 @@ export const isSupportedChain = (chainId: number): boolean => {
 // Default chain (Avalanche Fuji)
 export const defaultChain = avalancheFuji;
 
-export const config = getDefaultConfig({
-  appName: 'Time Tokenizer',
-  projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'b76a362849ddcf14e3d326135eed54fe',
+export const config = createConfig({
   chains: supportedChains,
+  connectors: [
+    injected(),
+    metaMask(),
+  ],
+  transports: {
+    [avalancheFuji.id]: http(avalancheFuji.rpcUrls.default.http[0]),
+    [sepolia.id]: http(),
+    [baseSepolia.id]: http(),
+    [mainnet.id]: http(),
+    [base.id]: http(),
+    [polygon.id]: http(),
+    [optimism.id]: http(),
+    [arbitrum.id]: http(),
+  },
   ssr: false,
 });

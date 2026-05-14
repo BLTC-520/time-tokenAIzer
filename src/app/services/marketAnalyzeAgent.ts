@@ -1,6 +1,5 @@
 // src/agents/marketAnalyzeAgent.ts
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createPublicClient, http, PublicClient, getContract } from 'viem';
 
 import {
@@ -9,7 +8,6 @@ import {
   AVALANCHE_FUJI_CHAIN_ID,
   RPC_URLS,
   CHAINLINK_CONFIG,
-  AI_CONFIG,
   MARKET_ANALYSIS_CONFIG,
   ERROR_MESSAGES,
   SUCCESS_MESSAGES,
@@ -76,8 +74,6 @@ interface ChainlinkSkillDataInterface {
 
 class MarketAnalyzeAgent {
   private isInitialized = false;
-  private genAI: GoogleGenerativeAI | null = null;
-  private model: any = null;
   private publicClient: PublicClient | null = null;
   private contract: any = null;
   private dataCache: Map<string, { data: any; timestamp: number }> = new Map();
@@ -87,24 +83,7 @@ class MarketAnalyzeAgent {
     if (this.isInitialized) return;
 
     try {
-      console.log('📊 Initializing Market Analyzer Agent (Chainlink Functions Only)...');
-
-      // Initialize Gemini AI
-      const apiKey = AI_CONFIG.GEMINI_API_KEY;
-      if (apiKey && apiKey !== "AIzaSyBcWd8-saOpSMbpST9WThYVoT7rSOCaY2g") {
-        this.genAI = new GoogleGenerativeAI(apiKey);
-        this.model = this.genAI.getGenerativeModel({
-          model: AI_CONFIG.MODEL_NAME,
-          generationConfig: {
-            maxOutputTokens: AI_CONFIG.MAX_TOKENS,
-            temperature: AI_CONFIG.TEMPERATURE
-          }
-        });
-        console.log('🧠 Gemini AI model loaded');
-      } else {
-        console.warn('⚠️ Using demo API key, will use intelligent simulation');
-      }
-
+      console.log('📊 Initializing Market Analyzer Agent with Chainlink data and server-side GPT synthesis...');
       this.isInitialized = true;
       console.log('✅ Market Analyzer Agent initialized (Chainlink Functions Only)');
     } catch (error) {
@@ -161,14 +140,8 @@ class MarketAnalyzeAgent {
         throw new Error('No Chainlink Functions data available');
       }
 
-      // Generate analysis based on available AI capability
-      if (this.model) {
-        console.log('🧠 Using Gemini AI for advanced analysis...');
-        return await this.generateAIAnalysis(validSkills, chainlinkData);
-      } else {
-        console.log('🧠 Using intelligent rule-based analysis...');
-        return this.generateIntelligentAnalysis(validSkills, chainlinkData);
-      }
+      console.log('🧠 Using server-side GPT for advanced analysis...');
+      return await this.generateAIAnalysis(validSkills, chainlinkData);
     } catch (error) {
       console.error('❌ Error in market analysis:', error);
       throw new Error('Failed to analyze market: ' + (error as Error).message);
@@ -239,12 +212,16 @@ class MarketAnalyzeAgent {
           throw new Error('Failed to initialize Web3 provider');
         }
       }
+      const publicClient = this.publicClient;
+      if (!publicClient) {
+        throw new Error('Web3 provider unavailable');
+      }
 
       // Connect to contract
       this.contract = getContract({
         address: contractAddress as `0x${string}`,
         abi: GETSKILLPRICE_ABI,
-        client: this.publicClient,
+        client: publicClient,
       });
       console.log('📋 Contract connected successfully');
 
@@ -483,9 +460,23 @@ Focus on actionable insights, specific rate recommendations, and current market 
 `;
 
     try {
-      const result = await this.model!.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
+      const response = await fetch('/api/ai/market-analysis', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userSkills,
+          chainlinkData,
+          prompt,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Market analysis API error: ${response.status}`);
+      }
+
+      const { text } = await response.json();
 
       // Extract JSON from response
       const jsonMatch = text.match(/\{[\s\S]*\}/);

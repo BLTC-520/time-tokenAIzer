@@ -30,7 +30,7 @@ import {
   disableAutoSave,
   clearSessionData,
 } from '../utils/localStorage';
-import { PortfolioData } from '../services/elizaAgent';
+import type { PortfolioData } from '../types/portfolio';
 
 // Main hook for session management
 export const useSessionStorage = () => {

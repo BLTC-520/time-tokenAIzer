@@ -301,10 +301,10 @@ export default function TransactionProgress({
           className="text-center mb-8"
         >
           <h1 className="text-3xl md:text-4xl font-bold text-black mb-4">
-            🚀 Creating Your Tokens
+            Publishing Your Inventory
           </h1>
           <p className="text-gray-600 text-lg mb-4">
-            {bundle.bundleName} Strategy - {bundle.tokens.length} Token(s)
+            {bundle.bundleName} strategy, {bundle.tokens.length} provider item(s)
           </p>
           
           {/* Progress Bar */}
@@ -317,7 +317,7 @@ export default function TransactionProgress({
             />
           </div>
           <div className="text-gray-600 text-sm">
-            {completedSteps} of {steps.length} tokens created ({Math.round(progressPercentage)}%)
+            {completedSteps} of {steps.length} inventory items published ({Math.round(progressPercentage)}%)
           </div>
         </motion.div>
 

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TokenizeAgent, AgenticAnalysis, TokenBundle } from '../services/tokenizeAgent';
-import { PortfolioData } from '../services/elizaAgent';
+import type { PortfolioData } from '../types/portfolio';
 import { UserAnswers } from '../utils/localStorage';
 import { useTimeTokenizerStorage } from '../hooks/useLocalStorage';
 import GoalInput from './GoalInput';
@@ -42,15 +42,7 @@ export default function AgenticMode({
     try {
       console.log('🎯 Starting agentic analysis for goal:', userGoal);
       
-      // Get API key
-      const sessionData = storage.session.sessionData;
-      const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || sessionData?.geminiApiKey || '';
-      
-      if (!apiKey) {
-        throw new Error('Gemini API key not found');
-      }
-
-      const agent = new TokenizeAgent(apiKey);
+      const agent = new TokenizeAgent();
       const agenticResult = await agent.analyzeGoalForTokenBundles(userGoal, portfolioData, userAnswers);
       
       setAnalysis(agenticResult);
@@ -59,7 +51,7 @@ export default function AgenticMode({
       console.error('❌ Agentic analysis failed:', error);
       // Use fallback analysis
       try {
-        const agent = new TokenizeAgent('');
+        const agent = new TokenizeAgent();
         const fallbackResult = await agent.analyzeGoalForTokenBundles(userGoal, portfolioData, userAnswers);
         setAnalysis(fallbackResult);
         setCurrentStep('bundles');
@@ -154,17 +146,17 @@ export default function AgenticMode({
         return (
           <div className="min-h-screen bg-white flex items-center justify-center p-8">
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 max-w-2xl w-full text-center">
-              <div className="text-green-600 text-4xl mb-4">✅</div>
-              <h2 className="text-black text-3xl font-bold mb-4">Tokens Created Successfully!</h2>
+              <div className="text-green-600 text-4xl mb-4">✓</div>
+              <h2 className="text-black text-3xl font-bold mb-4">Inventory Published Successfully</h2>
               <p className="text-gray-600 mb-6">
-                Your agentic strategy has been executed. {createdTokens.length} token(s) created.
+                Your agentic strategy has been prepared. {createdTokens.length} inventory item(s) published.
               </p>
               
               <div className="bg-gray-100 border border-gray-200 rounded-lg p-4 mb-6">
-                <h3 className="text-black font-semibold mb-2">Created Tokens:</h3>
+                <h3 className="text-black font-semibold mb-2">Published inventory:</h3>
                 {createdTokens.map((tokenId, index) => (
                   <div key={tokenId} className="text-gray-700 text-sm">
-                    Token #{tokenId} - {selectedBundle?.tokens[index]?.serviceName}
+                    Provider item #{tokenId} - {selectedBundle?.tokens[index]?.serviceName}
                   </div>
                 ))}
               </div>
@@ -186,7 +178,7 @@ export default function AgenticMode({
                   }}
                   className="bg-gray-100 hover:bg-gray-200 text-black px-8 py-3 rounded-lg font-medium transition-all border border-gray-300"
                 >
-                  Create More Tokens
+                  Publish More Inventory
                 </button>
               </div>
             </div>

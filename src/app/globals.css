@@ -1,8 +1,43 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0f0f23;
-  --foreground: #ffffff;
+  --graphite-950: oklch(16% 0.01 165);
+  --graphite-900: oklch(20% 0.012 165);
+  --graphite-850: oklch(22% 0.012 165);
+  --graphite-800: oklch(25% 0.014 165);
+  --graphite-700: oklch(31% 0.014 165);
+  --graphite-600: oklch(40% 0.018 165);
+  --graphite-300: oklch(72% 0.012 165);
+  --graphite-200: oklch(86% 0.01 165);
+  --graphite-100: oklch(94% 0.008 165);
+  --jade: oklch(72% 0.13 158);
+  --jade-pressed: oklch(64% 0.12 158);
+  --jade-muted: oklch(72% 0.07 158 / 18%);
+  --amber: oklch(76% 0.14 78);
+  --amber-muted: oklch(76% 0.1 78 / 18%);
+  --red: oklch(67% 0.17 28);
+  --red-muted: oklch(67% 0.13 28 / 18%);
+  --background: var(--graphite-950);
+  --foreground: var(--graphite-100);
+  --surface: var(--graphite-900);
+  --surface-raised: var(--graphite-800);
+  --surface-subtle: oklch(18% 0.01 165);
+  --border: var(--graphite-600);
+  --border-muted: var(--graphite-700);
+  --text-strong: var(--graphite-100);
+  --text: var(--graphite-200);
+  --text-muted: var(--graphite-300);
+  --text-faint: oklch(58% 0.012 165);
+  --primary: var(--jade);
+  --primary-pressed: var(--jade-pressed);
+  --success: oklch(69% 0.12 158);
+  --warning: var(--amber);
+  --danger: var(--red);
+  --focus-ring: oklch(82% 0.11 158);
+  --shadow-soft: 0 16px 40px oklch(8% 0.01 165 / 40%);
+  --radius-control: 8px;
+  --radius-panel: 8px;
+  --font-inter: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 }
 
 @theme inline {
@@ -14,15 +49,261 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0f0f23;
-    --foreground: #ffffff;
+    --background: var(--graphite-950);
+    --foreground: var(--graphite-100);
   }
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-inter), system-ui, sans-serif;
+  margin: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.protocol-shell {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, oklch(27% 0.035 158 / 28%), transparent 34rem),
+    linear-gradient(180deg, var(--graphite-950), oklch(13% 0.01 165));
+  color: var(--text);
+}
+
+.material-panel {
+  background: oklch(20% 0.012 165 / 92%);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-soft);
+}
+
+.transaction-sheet {
+  background: oklch(22% 0.014 165 / 94%);
+  border: 1px solid oklch(52% 0.025 165 / 62%);
+  border-radius: var(--radius-panel);
+  box-shadow: 0 20px 56px oklch(7% 0.01 165 / 48%);
+  backdrop-filter: blur(14px);
+}
+
+.liquid-guide-root {
+  bottom: 24px;
+  left: 24px;
+  position: fixed;
+  z-index: 60;
+}
+
+.liquid-guide-launcher,
+.liquid-guide-note,
+.liquid-guide-icon-button,
+.liquid-guide-nav-button,
+.liquid-guide-primary-button {
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+}
+
+.liquid-guide-launcher {
+  align-items: center;
+  background:
+    linear-gradient(135deg, oklch(97% 0.012 165 / 24%), oklch(72% 0.09 158 / 18%)),
+    oklch(22% 0.014 165 / 72%);
+  border: 1px solid oklch(82% 0.05 158 / 38%);
+  border-radius: 999px;
+  box-shadow: 0 14px 36px oklch(7% 0.01 165 / 46%);
+  color: var(--text-strong);
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 700;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  transition: background 180ms ease, border-color 180ms ease, transform 180ms ease;
+}
+
+.liquid-guide-launcher:hover,
+.liquid-guide-icon-button:hover,
+.liquid-guide-nav-button:hover:not(:disabled) {
+  border-color: oklch(82% 0.05 158 / 62%);
+  transform: translateY(-1px);
+}
+
+.liquid-guide-note {
+  background:
+    linear-gradient(150deg, oklch(98% 0.012 165 / 16%), transparent 42%),
+    linear-gradient(330deg, oklch(72% 0.09 158 / 20%), transparent 44%),
+    oklch(20% 0.012 165 / 78%);
+  border: 1px solid oklch(82% 0.05 158 / 34%);
+  border-radius: 18px;
+  bottom: 58px;
+  box-shadow:
+    0 24px 68px oklch(7% 0.01 165 / 54%),
+    inset 0 1px 0 oklch(98% 0.01 165 / 18%);
+  color: var(--text);
+  left: 0;
+  overflow: hidden;
+  padding: 18px;
+  position: absolute;
+  width: min(380px, calc(100vw - 32px));
+}
+
+.liquid-guide-note__shine {
+  background: linear-gradient(105deg, transparent 0%, oklch(100% 0 0 / 18%) 42%, transparent 74%);
+  height: 140%;
+  left: -42%;
+  opacity: 0.8;
+  pointer-events: none;
+  position: absolute;
+  top: -28%;
+  transform: rotate(8deg);
+  width: 42%;
+}
+
+.liquid-guide-icon,
+.liquid-guide-icon-button {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.liquid-guide-icon {
+  background: var(--jade-muted);
+  border: 1px solid oklch(82% 0.05 158 / 30%);
+  color: var(--primary);
+  height: 34px;
+  width: 34px;
+}
+
+.liquid-guide-icon-button {
+  background: oklch(24% 0.014 165 / 54%);
+  border: 1px solid var(--border-muted);
+  color: var(--text);
+  height: 34px;
+  transition: border-color 180ms ease, transform 180ms ease;
+  width: 34px;
+}
+
+.liquid-guide-dot {
+  background: oklch(58% 0.012 165 / 42%);
+  border: 0;
+  border-radius: 999px;
+  height: 6px;
+  transition: background 180ms ease, width 180ms ease;
+  width: 18px;
+}
+
+.liquid-guide-dot--active {
+  background: var(--primary);
+  width: 34px;
+}
+
+.liquid-guide-nav-button,
+.liquid-guide-primary-button {
+  align-items: center;
+  border-radius: var(--radius-control);
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 6px;
+  justify-content: center;
+  min-height: 40px;
+  transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
+}
+
+.liquid-guide-nav-button {
+  background: oklch(24% 0.014 165 / 54%);
+  border: 1px solid var(--border-muted);
+  color: var(--text);
+  padding: 0 10px;
+}
+
+.liquid-guide-primary-button {
+  background: var(--primary);
+  border: 1px solid oklch(82% 0.05 158 / 44%);
+  color: var(--background);
+  flex: 1;
+  padding: 0 12px;
+}
+
+.liquid-guide-primary-button:hover:not(:disabled) {
+  background: var(--primary-pressed);
+}
+
+.liquid-guide-nav-button:disabled,
+.liquid-guide-primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.booking-marketplace-grid {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr) 360px;
+  gap: 16px;
+  align-items: start;
+}
+
+.booking-marketplace-right {
+  display: grid;
+  gap: 16px;
+}
+
+.provider-table-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) 100px 120px 110px 118px;
+  gap: 12px;
+  align-items: center;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1180px) {
+  .booking-marketplace-grid {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
+
+  .booking-marketplace-right {
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 860px) {
+  .booking-marketplace-grid,
+  .booking-marketplace-right {
+    grid-template-columns: 1fr;
+  }
+
+  .provider-table-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .liquid-guide-root {
+    bottom: 18px;
+    left: 16px;
+    right: 16px;
+  }
+
+  .liquid-guide-note {
+    width: calc(100vw - 32px);
+  }
 }
 
 /* Custom animations */
@@ -75,15 +356,26 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.1);
+  background: oklch(24% 0.012 165);
   border-radius: 10px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.3);
+  background: oklch(48% 0.018 165);
   border-radius: 10px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.5);
+  background: oklch(58% 0.018 165);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }

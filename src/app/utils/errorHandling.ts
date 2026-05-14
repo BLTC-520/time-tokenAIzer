@@ -18,6 +18,7 @@ export interface ErrorContext {
   chainId?: number;
   contractAddress?: string;
   transactionHash?: string;
+  details?: any;
 }
 
 export class ErrorHandler {

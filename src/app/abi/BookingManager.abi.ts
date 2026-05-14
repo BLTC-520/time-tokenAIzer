@@ -1,0 +1,97 @@
+export const BOOKING_MANAGER_ABI = [
+  {
+    type: 'function',
+    name: 'providers',
+    stateMutability: 'view',
+    inputs: [{ name: 'providerId', type: 'uint256' }],
+    outputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'availableHoursWad', type: 'uint256' },
+      { name: 'paused', type: 'bool' },
+    ],
+  },
+  {
+    type: 'function',
+    name: 'availableHours',
+    stateMutability: 'view',
+    inputs: [{ name: 'providerId', type: 'uint256' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'isQuoteValid',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'quoteId', type: 'bytes32' },
+      { name: 'buyer', type: 'address' },
+      { name: 'providerId', type: 'uint256' },
+      { name: 'hoursWad', type: 'uint256' },
+      { name: 'slotId', type: 'uint256' },
+      { name: 'expiresAt', type: 'uint256' },
+      { name: 'nonce', type: 'uint256' },
+      { name: 'signature', type: 'bytes' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    type: 'function',
+    name: 'registerProvider',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'hoursWad', type: 'uint256' },
+    ],
+    outputs: [{ name: 'providerId', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'setProviderInventory',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'providerId', type: 'uint256' },
+      { name: 'hoursWad', type: 'uint256' },
+      { name: 'paused', type: 'bool' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'bookWithCredits',
+    stateMutability: 'nonpayable',
+    inputs: [
+      {
+        name: 'quote',
+        type: 'tuple',
+        components: [
+          { name: 'quoteId', type: 'bytes32' },
+          { name: 'buyer', type: 'address' },
+          { name: 'providerId', type: 'uint256' },
+          { name: 'hoursWad', type: 'uint256' },
+          { name: 'slotId', type: 'uint256' },
+          { name: 'expiresAt', type: 'uint256' },
+          { name: 'nonce', type: 'uint256' },
+          { name: 'signature', type: 'bytes' },
+        ],
+      },
+    ],
+    outputs: [{ name: 'bookingId', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'completeBooking',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'bookingId', type: 'uint256' }],
+    outputs: [],
+  },
+  {
+    type: 'event',
+    name: 'Booked',
+    inputs: [
+      { indexed: true, name: 'bookingId', type: 'uint256' },
+      { indexed: true, name: 'buyer', type: 'address' },
+      { indexed: true, name: 'providerId', type: 'uint256' },
+      { indexed: false, name: 'slotId', type: 'uint256' },
+      { indexed: false, name: 'hoursWad', type: 'uint256' },
+    ],
+  },
+] as const;

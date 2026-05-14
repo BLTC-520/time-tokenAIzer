@@ -1,0 +1,7 @@
+@openzeppelin/contracts/=../node_modules/@openzeppelin/contracts/
+@uniswap/v4-core/=../node_modules/@uniswap/v4-core/
+@uniswap/v4-periphery/=../node_modules/@uniswap/v4-periphery/
+forge-std/=../node_modules/forge-std/
+ds-test/=lib/ds-test/
+v4-core/=../node_modules/@uniswap/v4-core/
+v4-periphery/=../node_modules/@uniswap/v4-periphery/
