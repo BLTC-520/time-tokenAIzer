@@ -39,10 +39,12 @@ export interface SwapQuoteResult {
 }
 
 export interface BookingQuoteRequest {
+  chainId: number;
   providerId: bigint;
   buyer: AddressString;
   hoursWad: WadAmount;
   slotId: bigint;
+  quoteMode?: 'auto' | 'real' | 'mock';
 }
 
 export interface CheckoutSwapRequest {

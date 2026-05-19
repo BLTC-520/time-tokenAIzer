@@ -35,6 +35,12 @@ const optionalAddress = (value: string | undefined): `0x${string}` =>
 	(value && value.startsWith('0x') ? value : '0x0000000000000000000000000000000000000000') as `0x${string}`;
 
 export const TIME_MARKET_CONTRACTS = {
+	[ETHEREUM_SEPOLIA_CHAIN_ID]: {
+		timeCreditToken: optionalAddress(process.env.NEXT_PUBLIC_TIME_CREDIT_TOKEN_SEPOLIA || process.env.NEXT_PUBLIC_TIME_CREDIT_TOKEN_TESTNET),
+		bookingManager: optionalAddress(process.env.NEXT_PUBLIC_BOOKING_MANAGER_SEPOLIA || process.env.NEXT_PUBLIC_BOOKING_MANAGER_TESTNET),
+		timePoolHook: optionalAddress(process.env.NEXT_PUBLIC_TIME_POOL_HOOK_SEPOLIA || process.env.NEXT_PUBLIC_TIME_POOL_HOOK_TESTNET),
+		usdc: optionalAddress(process.env.NEXT_PUBLIC_USDC_SEPOLIA || process.env.NEXT_PUBLIC_TEST_USDC)
+	},
 	[BASE_SEPOLIA_CHAIN_ID]: {
 		timeCreditToken: optionalAddress(process.env.NEXT_PUBLIC_TIME_CREDIT_TOKEN_BASE_SEPOLIA),
 		bookingManager: optionalAddress(process.env.NEXT_PUBLIC_BOOKING_MANAGER_BASE_SEPOLIA),
@@ -49,9 +55,9 @@ export const getTimeMarketContracts = (chainId: number) => {
 
 // ===== NETWORK CONFIGURATION =====
 export const RPC_URLS = {
-	[AVALANCHE_FUJI_CHAIN_ID]: process.env.AVALANCHE_FUJI_RPC || 'https://avax-fuji.g.alchemy.com/v2/ZDRXbJd_qraq5rTvWv4Qv',
-	[BASE_SEPOLIA_CHAIN_ID]: process.env.SEPOLIA_BASE_RPC || 'https://base-sepolia.g.alchemy.com/v2/ZDRXbJd_qraq5rTvWv4Qv',
-	[ETHEREUM_SEPOLIA_CHAIN_ID]: process.env.SEPOLIA_ETH_RPC || 'https://eth-sepolia.g.alchemy.com/v2/ZDRXbJd_qraq5rTvWv4Qv'
+	[AVALANCHE_FUJI_CHAIN_ID]: process.env.AVALANCHE_FUJI_RPC || 'https://api.avax-test.network/ext/bc/C/rpc',
+	[BASE_SEPOLIA_CHAIN_ID]: process.env.BASE_SEPOLIA_RPC || process.env.SEPOLIA_BASE_RPC || 'https://sepolia.base.org',
+	[ETHEREUM_SEPOLIA_CHAIN_ID]: process.env.SEPOLIA_RPC || process.env.SEPOLIA_ETH_RPC || 'https://ethereum-sepolia-rpc.publicnode.com'
 } as const;
 
 export const BLOCK_EXPLORERS = {

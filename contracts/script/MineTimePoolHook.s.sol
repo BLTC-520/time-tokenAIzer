@@ -9,22 +9,28 @@ import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {IBookingManager} from "../src/interfaces/IBookingManager.sol";
 import {TimePoolHook} from "../src/TimePoolHook.sol";
 
+interface VmEnv {
+    function envAddress(string calldata name) external returns (address value);
+}
+
 contract MineTimePoolHook is Script {
+    address internal constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
+    VmEnv internal constant vmx =
+        VmEnv(address(uint160(uint256(keccak256("hevm cheat code")))));
+
     function run()
         external
-        view
         returns (address hookAddress, bytes32 salt)
     {
-        address deployer = vm.envAddress("DEPLOYER_ADDRESS");
-        IPoolManager poolManager = IPoolManager(vm.envAddress("BASE_SEPOLIA_POOL_MANAGER"));
-        IBookingManager booking = IBookingManager(vm.envAddress("BOOKING_MANAGER_BASE_SEPOLIA"));
-        address owner = vm.envAddress("HOOK_OWNER");
+        IPoolManager poolManager = IPoolManager(vmx.envAddress("V4_POOL_MANAGER"));
+        IBookingManager booking = IBookingManager(vmx.envAddress("BOOKING_MANAGER_TESTNET"));
+        address owner = vmx.envAddress("HOOK_OWNER");
 
         uint160 flags = uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG);
         bytes memory constructorArgs = abi.encode(poolManager, booking, owner);
 
         (hookAddress, salt) = HookMiner.find(
-            deployer,
+            CREATE2_DEPLOYER,
             flags,
             type(TimePoolHook).creationCode,
             constructorArgs

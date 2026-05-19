@@ -53,6 +53,7 @@ export interface BookingServiceOptions {
   walletClient?: WalletClient;
   account?: Address | Account;
   fetcher?: typeof fetch;
+  quoteMode?: 'auto' | 'real' | 'mock';
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -90,10 +91,12 @@ export class BookingService {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        chainId: params.chainId,
         providerId: params.providerId.toString(),
         buyer: params.buyer,
         hoursWad: params.hoursWad.toString(),
         slotId: params.slotId.toString(),
+        quoteMode: params.quoteMode ?? this.options.quoteMode ?? 'auto',
       }),
     });
 
