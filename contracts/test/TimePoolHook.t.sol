@@ -72,6 +72,8 @@ contract TimePoolHookTest is Test {
             tickSpacing: 60,
             hooks: hook
         });
+
+        hook.setRouterQuoteConsumptionTrust(router, true);
     }
 
     function testPermissionsOnlyBeforeAndAfterSwap() public {
@@ -92,6 +94,16 @@ contract TimePoolHookTest is Test {
         assertTrue(hook.allowedRouter(router));
     }
 
+    function testOwnerCanConfigureHookDataAndSingleUseGuards() public {
+        hook.setRequireHookDataForSwap(true);
+        hook.setEnforceSingleUseQuote(false);
+        hook.setRouterQuoteConsumptionTrust(router, false);
+
+        assertTrue(hook.requireHookDataForSwap());
+        assertFalse(hook.enforceSingleUseQuote());
+        assertFalse(hook.routerCanConsumeQuotes(router));
+    }
+
     function testNonOwnerCannotAllowRouter() public {
         vm.prank(address(0xBAD));
         vm.expectRevert(TimePoolHook.NotOwner.selector);
@@ -108,6 +120,47 @@ contract TimePoolHookTest is Test {
 
         assertEq(selector, BaseHook.beforeSwap.selector);
         assertEq(feeOverride, 0);
+    }
+
+    function testBeforeSwapRejectsMissingHookDataWhenRequired() public {
+        hook.setAllowedPool(key, true);
+        hook.setAllowedRouter(router, true);
+        hook.setRequireHookDataForSwap(true);
+
+        vm.prank(poolManager);
+        vm.expectRevert(TimePoolHook.MissingHookData.selector);
+        hook.beforeSwap(router, key, _swapParams(), "");
+    }
+
+    function testBeforeSwapAllowsValidBookingIntentHookData() public {
+        hook.setAllowedPool(key, true);
+        hook.setAllowedRouter(router, true);
+        hook.setRouterQuoteConsumptionTrust(router, true);
+
+        vm.prank(poolManager);
+        (bytes4 selector,, uint24 feeOverride) =
+            hook.beforeSwap(router, key, _swapParams(), abi.encode(_hookData()));
+
+        assertEq(selector, BaseHook.beforeSwap.selector);
+        assertEq(feeOverride, 0);
+    }
+
+    function testBeforeSwapRejectsMalformedNonEmptyHookData() public {
+        hook.setAllowedPool(key, true);
+        hook.setAllowedRouter(router, true);
+
+        vm.prank(poolManager);
+        vm.expectRevert();
+        hook.beforeSwap(router, key, _swapParams(), hex"deadbeef");
+    }
+
+    function testAfterSwapRejectsMalformedNonEmptyHookData() public {
+        hook.setAllowedPool(key, true);
+        hook.setAllowedRouter(router, true);
+
+        vm.prank(poolManager);
+        vm.expectRevert();
+        hook.afterSwap(router, key, _swapParams(), BalanceDelta.wrap(0), hex"deadbeef");
     }
 
     function testBeforeSwapRejectsUnallowedPool() public {
@@ -150,6 +203,34 @@ contract TimePoolHookTest is Test {
         hook.beforeSwap(router, key, _swapParams(), abi.encode(data));
     }
 
+    function testFuzzBeforeSwapRejectsMissingBuyerForBookingIntent(uint256 hoursWad) public {
+        hook.setAllowedPool(key, true);
+        hook.setAllowedRouter(router, true);
+
+        TimePoolHook.HookData memory data = _hookData();
+        data.buyer = address(0);
+        data.hoursWad = bound(hoursWad, 1, 1_000 ether);
+
+        vm.prank(poolManager);
+        vm.expectRevert(TimePoolHook.MissingBuyer.selector);
+        hook.beforeSwap(router, key, _swapParams(), abi.encode(data));
+    }
+
+    function testFuzzBeforeSwapRejectsZeroHoursForBookingIntent(address fuzzBuyer) public {
+        hook.setAllowedPool(key, true);
+        hook.setAllowedRouter(router, true);
+
+        vm.assume(fuzzBuyer != address(0));
+
+        TimePoolHook.HookData memory data = _hookData();
+        data.buyer = fuzzBuyer;
+        data.hoursWad = 0;
+
+        vm.prank(poolManager);
+        vm.expectRevert(TimePoolHook.InvalidHours.selector);
+        hook.beforeSwap(router, key, _swapParams(), abi.encode(data));
+    }
+
     function testBeforeSwapRejectsInsufficientInventory() public {
         hook.setAllowedPool(key, true);
         hook.setAllowedRouter(router, true);
@@ -157,6 +238,25 @@ contract TimePoolHookTest is Test {
 
         TimePoolHook.HookData memory data = _hookData();
         data.hoursWad = 2 ether;
+
+        vm.prank(poolManager);
+        vm.expectRevert(TimePoolHook.InsufficientInventory.selector);
+        hook.beforeSwap(router, key, _swapParams(), abi.encode(data));
+    }
+
+    function testFuzzBeforeSwapRejectsHoursAboveInventory(
+        uint128 availableHours,
+        uint128 extraHours
+    ) public {
+        hook.setAllowedPool(key, true);
+        hook.setAllowedRouter(router, true);
+
+        uint256 available = bound(uint256(availableHours), 0, 1_000 ether);
+        uint256 extra = bound(uint256(extraHours), 1, 1_000 ether);
+        booking.setHoursAvailable(available);
+
+        TimePoolHook.HookData memory data = _hookData();
+        data.hoursWad = available + extra;
 
         vm.prank(poolManager);
         vm.expectRevert(TimePoolHook.InsufficientInventory.selector);
@@ -173,9 +273,86 @@ contract TimePoolHookTest is Test {
         hook.beforeSwap(router, key, _swapParams(), abi.encode(_hookData()));
     }
 
+    function testBeforeSwapRejectsQuoteReplayWhenSingleUseEnabled() public {
+        hook.setAllowedPool(key, true);
+        hook.setAllowedRouter(router, true);
+        hook.setRouterQuoteConsumptionTrust(router, true);
+        bytes memory encoded = abi.encode(_hookData());
+
+        vm.prank(poolManager);
+        hook.beforeSwap(router, key, _swapParams(), encoded);
+
+        vm.prank(poolManager);
+        vm.expectRevert(TimePoolHook.QuoteAlreadyConsumed.selector);
+        hook.beforeSwap(router, key, _swapParams(), encoded);
+    }
+
+    function testBeforeSwapRejectsQuoteConsumptionForUntrustedRouter() public {
+        hook.setAllowedPool(key, true);
+        hook.setAllowedRouter(router, true);
+        hook.setRouterQuoteConsumptionTrust(router, false);
+
+        vm.prank(poolManager);
+        vm.expectRevert(TimePoolHook.RouterNotTrustedForQuoteConsumption.selector);
+        hook.beforeSwap(router, key, _swapParams(), abi.encode(_hookData()));
+    }
+
+    function testBeforeSwapAllowsQuoteReplayWhenSingleUseDisabled() public {
+        hook.setAllowedPool(key, true);
+        hook.setAllowedRouter(router, true);
+        hook.setEnforceSingleUseQuote(false);
+        bytes memory encoded = abi.encode(_hookData());
+
+        vm.prank(poolManager);
+        hook.beforeSwap(router, key, _swapParams(), encoded);
+
+        vm.prank(poolManager);
+        (bytes4 selector,, uint24 feeOverride) = hook.beforeSwap(router, key, _swapParams(), encoded);
+        assertEq(selector, BaseHook.beforeSwap.selector);
+        assertEq(feeOverride, 0);
+    }
+
+    function testFuzzBeforeSwapRejectsInvalidQuoteForValidShape(
+        address fuzzBuyer,
+        uint128 hoursWad,
+        uint256 providerId,
+        uint256 slotId
+    ) public {
+        hook.setAllowedPool(key, true);
+        hook.setAllowedRouter(router, true);
+        booking.setQuoteValid(false);
+
+        vm.assume(fuzzBuyer != address(0));
+
+        TimePoolHook.HookData memory data = _hookData();
+        data.buyer = fuzzBuyer;
+        data.providerId = providerId;
+        data.hoursWad = bound(uint256(hoursWad), 1, 100 ether);
+        data.slotId = slotId;
+
+        vm.prank(poolManager);
+        vm.expectRevert(TimePoolHook.InvalidQuote.selector);
+        hook.beforeSwap(router, key, _swapParams(), abi.encode(data));
+    }
+
     function testAfterSwapEmitsObservedSwap() public {
         hook.setAllowedPool(key, true);
         hook.setAllowedRouter(router, true);
+
+        TimePoolHook.HookData memory data = _hookData();
+
+        vm.expectEmit(true, true, true, true);
+        emit TimePoolHook.TimeSwapObserved(key.toId(), router, buyer, data.quoteId);
+
+        vm.prank(poolManager);
+        hook.afterSwap(router, key, _swapParams(), BalanceDelta.wrap(0), abi.encode(data));
+    }
+
+    function testAfterSwapDoesNotValidateBookingQuoteOrInventory() public {
+        hook.setAllowedPool(key, true);
+        hook.setAllowedRouter(router, true);
+        booking.setHoursAvailable(0);
+        booking.setQuoteValid(false);
 
         TimePoolHook.HookData memory data = _hookData();
 
@@ -190,6 +367,19 @@ contract TimePoolHookTest is Test {
         uint160 flags = uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG);
         assertEq(flags & uint160(Hooks.BEFORE_SWAP_FLAG), uint160(Hooks.BEFORE_SWAP_FLAG));
         assertEq(flags & uint160(Hooks.AFTER_SWAP_FLAG), uint160(Hooks.AFTER_SWAP_FLAG));
+    }
+
+    function invariant_HookNeverEnablesReturnDeltaOrLiquidityCallbacks() public {
+        Hooks.Permissions memory permissions = hook.getHookPermissions();
+
+        assertTrue(permissions.beforeSwap);
+        assertTrue(permissions.afterSwap);
+        assertFalse(permissions.beforeSwapReturnDelta);
+        assertFalse(permissions.afterSwapReturnDelta);
+        assertFalse(permissions.beforeAddLiquidity);
+        assertFalse(permissions.afterAddLiquidity);
+        assertFalse(permissions.beforeRemoveLiquidity);
+        assertFalse(permissions.afterRemoveLiquidity);
     }
 
     function _swapParams() internal pure returns (SwapParams memory) {

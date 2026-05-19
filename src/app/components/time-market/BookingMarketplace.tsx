@@ -57,7 +57,7 @@ function isOwnedByWallet(provider: MarketplaceProvider, address?: string) {
 
 const demoProviders: MarketplaceProvider[] = [
   {
-    providerId: '1042',
+    providerId: '1',
     owner: '0xaA00000000000000000000000000000000001042' as AddressString,
     serviceName: 'Protocol architecture review',
     headline: 'Review v4 hook boundaries, settlement assumptions, and launch risks.',
@@ -73,7 +73,7 @@ const demoProviders: MarketplaceProvider[] = [
     paused: false,
   },
   {
-    providerId: '1188',
+    providerId: '2',
     owner: '0xbB00000000000000000000000000000000001188' as AddressString,
     serviceName: 'AI workflow implementation',
     headline: 'Turn a tokenized service plan into agentic booking and follow-up ops.',
@@ -89,7 +89,7 @@ const demoProviders: MarketplaceProvider[] = [
     paused: false,
   },
   {
-    providerId: '1215',
+    providerId: '3',
     owner: '0xcC00000000000000000000000000000000001215' as AddressString,
     serviceName: 'Security tabletop session',
     headline: 'Map signing flows, Permit2 approvals, and booking failure recovery.',
@@ -105,7 +105,7 @@ const demoProviders: MarketplaceProvider[] = [
     paused: false,
   },
   {
-    providerId: '1301',
+    providerId: '4',
     owner: '0xdD00000000000000000000000000000000001301' as AddressString,
     serviceName: 'Launch readiness review',
     headline: 'Evaluate provider inventory, quote expiry, and checkout support paths.',
@@ -429,6 +429,7 @@ export default function BookingMarketplace({
               isConnected={isConnected}
               wrongNetwork={wrongNetwork}
               chainName={chainName}
+              chainId={chainId}
               walletAddress={address}
               onRequestedHoursChange={setRequestedHours}
             />

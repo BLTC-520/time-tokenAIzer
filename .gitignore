@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +40,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+# local runtime/workspace directories
+/.agents
+/.omx
+/x-ray
+# Foundry generated artifacts and broadcast caches
+/contracts/out/
+/contracts/cache/
+/contracts/broadcast/
+# local Codex skills cache
+/skills/
+/skills-lock.json

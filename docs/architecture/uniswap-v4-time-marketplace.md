@@ -57,6 +57,7 @@ flowchart LR
 - Uses `beforeSwap` to validate swap intent when `hookData` claims a booking-related purchase.
 - Uses `afterSwap` for lightweight telemetry after pool execution.
 - Does not book, transfer service rights, charge creator fees, or finalize marketplace settlement.
+- Allows empty `hookData` as a generic liquidity swap with no booking guarantee; non-empty `hookData` is booking-aware intent and must validate through `BookingManager`.
 
 ## Credits Purchase Then Booking
 
@@ -89,6 +90,8 @@ sequenceDiagram
   BookingManager-->>Frontend: Booking created
   Frontend-->>Buyer: Show booking proof
 ```
+
+The booking-aware checkout path intentionally sends `hookData`. A generic `TIME/USDC` swap without `hookData` may still trade liquidity, but it does not reserve inventory, accept a quote, or create service rights.
 
 ## Swap Plus Hook Inventory Check
 
@@ -139,7 +142,7 @@ Booking settlement needs final `TIME` ownership, slot locking, quote validation,
 ## Security Notes
 
 - The hook does not book. `TimePoolHook` must never call a booking creation path, reserve a slot, burn credits, or transfer service rights.
-- `hookData` buyer must be validated. The hook must not trust arbitrary encoded buyer addresses without checking the expected router provenance, swap sender, quote subject, and intended recipient semantics.
+- `hookData` buyer must be validated. The hook must not trust arbitrary encoded buyer addresses; booking-aware quote consumption is allowed only for routers separately trusted with `setRouterQuoteConsumptionTrust`, and final booking still requires `BookingManager.bookWithCredits`.
 - Signed quote validity is checked through `BookingManager`. The hook should delegate quote, provider, inventory, expiry, and replay checks to the marketplace contract instead of duplicating mutable marketplace state.
 - Hook permissions are `beforeSwap` and `afterSwap` only. Address mining and deployment must encode only those permission flags.
 - `afterSwap` is telemetry only in the MVP. It may emit swap intent or inventory pressure events, but it must not mutate booking lifecycle state.

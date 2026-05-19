@@ -34,19 +34,30 @@ contract TimePoolHook is BaseHook {
 
     mapping(PoolId poolId => bool allowed) public allowedPool;
     mapping(address router => bool allowed) public allowedRouter;
+    mapping(bytes32 quoteId => bool consumed) public consumedHookQuote;
+    mapping(address router => bool trusted) public routerCanConsumeQuotes;
+
+    bool public requireHookDataForSwap;
+    bool public enforceSingleUseQuote;
 
     error NotOwner();
     error PoolNotAllowed();
     error RouterNotAllowed();
     error MissingBuyer();
+    error MissingHookData();
     error MissingBookingManager();
     error MissingOwner();
+    error QuoteAlreadyConsumed();
+    error RouterNotTrustedForQuoteConsumption();
     error InvalidQuote();
     error InvalidHours();
     error InsufficientInventory();
 
     event PoolAllowed(PoolId indexed poolId, bool allowed);
     event RouterAllowed(address indexed router, bool allowed);
+    event RouterQuoteConsumptionTrustSet(address indexed router, bool trusted);
+    event RequireHookDataForSwapSet(bool required);
+    event EnforceSingleUseQuoteSet(bool enabled);
     event TimeSwapObserved(
         PoolId indexed poolId, address indexed router, address indexed buyer, bytes32 quoteId
     );
@@ -64,6 +75,7 @@ contract TimePoolHook is BaseHook {
 
         booking = _booking;
         owner = _owner;
+        enforceSingleUseQuote = true;
     }
 
     function setAllowedPool(PoolKey calldata key, bool allowed) external onlyOwner {
@@ -77,6 +89,21 @@ contract TimePoolHook is BaseHook {
         allowedRouter[router] = allowed;
 
         emit RouterAllowed(router, allowed);
+    }
+
+    function setRouterQuoteConsumptionTrust(address router, bool trusted) external onlyOwner {
+        routerCanConsumeQuotes[router] = trusted;
+        emit RouterQuoteConsumptionTrustSet(router, trusted);
+    }
+
+    function setRequireHookDataForSwap(bool required) external onlyOwner {
+        requireHookDataForSwap = required;
+        emit RequireHookDataForSwapSet(required);
+    }
+
+    function setEnforceSingleUseQuote(bool enabled) external onlyOwner {
+        enforceSingleUseQuote = enabled;
+        emit EnforceSingleUseQuoteSet(enabled);
     }
 
     function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
@@ -103,12 +130,20 @@ contract TimePoolHook is BaseHook {
         PoolKey calldata key,
         SwapParams calldata,
         bytes calldata hookData
-    ) internal view override returns (bytes4, BeforeSwapDelta, uint24) {
+    ) internal override returns (bytes4, BeforeSwapDelta, uint24) {
         _validatePoolAndRouter(key, sender);
 
-        if (hookData.length > 0) {
-            HookData memory data = abi.decode(hookData, (HookData));
-            _validateHookData(data);
+        if (hookData.length == 0) {
+            if (requireHookDataForSwap) revert MissingHookData();
+        } else {
+            HookData memory data = _validateHookDataAndReturn(hookData);
+            if (enforceSingleUseQuote) {
+                if (!routerCanConsumeQuotes[sender]) {
+                    revert RouterNotTrustedForQuoteConsumption();
+                }
+                if (consumedHookQuote[data.quoteId]) revert QuoteAlreadyConsumed();
+                consumedHookQuote[data.quoteId] = true;
+            }
         }
 
         return (BaseHook.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
@@ -141,7 +176,8 @@ contract TimePoolHook is BaseHook {
         if (!allowedRouter[router]) revert RouterNotAllowed();
     }
 
-    function _validateHookData(HookData memory data) private view {
+    function _validateHookDataAndReturn(bytes calldata hookData) private view returns (HookData memory data) {
+        data = abi.decode(hookData, (HookData));
         if (data.buyer == address(0)) revert MissingBuyer();
         if (data.hoursWad == 0) revert InvalidHours();
         if (booking.availableHours(data.providerId) < data.hoursWad) {
