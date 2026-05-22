@@ -11,7 +11,7 @@ The important boundary is deliberate: Uniswap v4 is the liquidity layer, not the
 - **BookingManager** owns provider inventory, signed quotes, slot uniqueness, and booking lifecycle state.
 - **Uniswap v4 TIME/USDC pool** provides credit liquidity and price discovery.
 - **TimePoolHook** performs pool-side checks for booking-aware swap intent, optional single-use quote consumption, and telemetry; it does not book slots.
-- **Booking checkout** now requests signed booking quotes through `/api/booking/quote`, can register provider inventory, can run the Permit2 + Universal Router swap path, and keeps final booking as a separate `BookingManager.bookWithCredits` transaction.
+- **Booking checkout** now requests signed booking quotes through `/api/booking/quote`, can register provider inventory, and books with existing `TIME` credits. Swap checkout stays disabled until a real provider pricing source is published.
 - **Ethereum Sepolia** has a recorded live deployment in `docs/deployment/sepolia-live-deployment.md`. Base Sepolia remains a supported v4 target.
 
 ## Ethereum Sepolia Deployment
@@ -30,13 +30,34 @@ Pool ID: `0xd2fa7fc47da4fdec875e0eaf18b8fbee6171891c256fb44341ea9c211fed93b7`
 
 ## Architecture
 
-```text
-Frontend marketplace
-  -> /api/booking/quote
-  -> BookingManager
-  -> TimeCreditToken
-  -> Uniswap v4 TIME/USDC pool
-  -> TimePoolHook
+Editable Excalidraw sources:
+
+- [System architecture](./docs/diagrams/time-v4-system-architecture.excalidraw)
+- [Booking-aware checkout activity](./docs/diagrams/time-v4-booking-activity.excalidraw)
+
+```mermaid
+flowchart LR
+  Buyer["Buyer wallet<br/>USDC + TIME"]
+  Frontend["Next.js marketplace<br/>BookingCheckout + inventory UI"]
+  QuoteAPI["/api/booking/quote<br/>EIP-712 quote signer"]
+  BookingManager["BookingManager<br/>inventory, quotes, slots, bookings"]
+  TimeCredit["TimeCreditToken<br/>ERC-20 TIME credits"]
+  Router["Permit2 + Universal Router<br/>optional priced V4_SWAP path"]
+  Pool["Uniswap v4 TIME/USDC pool<br/>liquidity + price discovery"]
+  Hook["TimePoolHook<br/>beforeSwap validation<br/>afterSwap telemetry"]
+  Events["TimeSwapObserved<br/>pool/router/buyer/quoteId"]
+
+  Buyer --> Frontend
+  Frontend -->|"quote request"| QuoteAPI
+  QuoteAPI -->|"read provider + slot state"| BookingManager
+  Frontend -->|"register inventory, book credits"| BookingManager
+  BookingManager -->|"burn TIME, check balances"| TimeCredit
+  Frontend -->|"optional swap when pricing is enabled"| Router
+  Router -->|"commands + hookData"| Pool
+  Pool -->|"callbacks"| Hook
+  Hook -->|"validate booking intent only"| BookingManager
+  Hook -.-> Events
+  Pool -->|"settled TIME from optional swap"| Buyer
 ```
 
 Core flow:
@@ -46,9 +67,48 @@ Core flow:
 3. Generate a GPT-assisted skill and inventory profile.
 4. Register provider inventory.
 5. Request a signed `BookingQuote` from `/api/booking/quote`.
-6. Acquire `TIME` credits through a v4 pool, or use existing credits.
+6. Use existing `TIME` credits; the v4 credit acquisition path applies only when real pricing is enabled or for manual/showcase flows.
 7. Book a slot with the signed quote through `BookingManager`.
-8. `BookingManager` burns or locks the required `TIME` and records booking state.
+8. `BookingManager` burns the required `TIME`, locks the slot, and records booking state.
+
+## Booking Activity Diagram
+
+Current checkout books with existing `TIME`. The swap branch below is the optional v4 credit-acquisition path for manual/showcase flows or a future priced checkout.
+
+```mermaid
+flowchart TD
+  Start([Buyer selects provider, hours, and slot])
+  QuoteRequest["Frontend requests BookingQuote<br/>provider, slot, hours"]
+  ValidateQuote{"BookingManager state<br/>provider registered and slot available?"}
+  QuoteRejected([Quote request rejected])
+  SignedQuote["Quote API returns signed<br/>EIP-712 BookingQuote"]
+  HasTime{"Buyer already has enough TIME?"}
+  PricingEnabled{"Real pricing source<br/>enabled for swap checkout?"}
+  ManualAcquire([Acquire TIME outside checkout<br/>or wait for priced swap support])
+  BuildHookData["Build hookData from quote<br/>buyer, provider, quoteId, deadline"]
+  Swap["Universal Router executes optional<br/>USDC -> TIME swap"]
+  BeforeSwap["TimePoolHook.beforeSwap<br/>allowlist + quote intent validation"]
+  IntentValid{"Intent valid and inventory available?"}
+  SwapRevert([Swap reverts])
+  PoolExec["v4 pool executes price movement"]
+  AfterSwap["TimePoolHook.afterSwap<br/>telemetry only"]
+  CreditsSettled["Swap settles<br/>buyer receives TIME"]
+  Book["BookingManager.bookWithCredits<br/>burn TIME, lock slot"]
+  Booked([Booked event and proof])
+
+  Start --> QuoteRequest --> ValidateQuote
+  ValidateQuote -- "no" --> QuoteRejected
+  ValidateQuote -- "yes" --> SignedQuote --> HasTime
+  HasTime -- "yes" --> Book
+  HasTime -- "no" --> PricingEnabled
+  PricingEnabled -- "no" --> ManualAcquire
+  PricingEnabled -- "yes" --> BuildHookData --> Swap --> BeforeSwap --> IntentValid
+  IntentValid -- "no" --> SwapRevert
+  IntentValid -- "yes" --> PoolExec --> AfterSwap --> CreditsSettled --> Book
+  Book --> Booked
+```
+
+The two-phase boundary is intentional: a booking-aware swap can validate intent and acquire credits, but a booking exists only after `BookingManager.bookWithCredits` succeeds with settled `TIME`.
 
 See [PRODUCT.md](./PRODUCT.md), [DESIGN.md](./DESIGN.md), and [docs/architecture/uniswap-v4-time-marketplace.md](./docs/architecture/uniswap-v4-time-marketplace.md) for the product, design, and protocol context.
 See [docs/security/time-pool-hook-review.md](./docs/security/time-pool-hook-review.md), [docs/deployment/v4-testnet-readiness.md](./docs/deployment/v4-testnet-readiness.md), [docs/deployment/sepolia-live-deployment.md](./docs/deployment/sepolia-live-deployment.md), and [docs/demo/time-v4-showcase-runbook.md](./docs/demo/time-v4-showcase-runbook.md) for the hook security checklist, v4 deployment evidence, and demo flow.
