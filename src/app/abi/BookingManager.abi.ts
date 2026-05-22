@@ -1,6 +1,30 @@
 export const BOOKING_MANAGER_ABI = [
   {
     type: 'function',
+    name: 'nextProviderId',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'PROVIDER_MANAGER_ROLE',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'bytes32' }],
+  },
+  {
+    type: 'function',
+    name: 'hasRole',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'role', type: 'bytes32' },
+      { name: 'account', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    type: 'function',
     name: 'providers',
     stateMutability: 'view',
     inputs: [{ name: 'providerId', type: 'uint256' }],

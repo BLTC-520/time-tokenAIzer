@@ -1,23 +1,20 @@
 'use client';
 
-import { Activity, CalendarClock, CircleAlert, Coins } from 'lucide-react';
+import { Activity, CalendarClock, CircleAlert } from 'lucide-react';
 
-export type InventoryFilter = 'all' | 'available' | 'near_term' | 'mine';
+export type InventoryFilter = 'all' | 'available' | 'mine';
 
 export interface InventoryFilterCounts {
   all: number;
   available: number;
-  near_term: number;
   mine: number;
 }
 
 interface ProviderInventoryPanelProps {
   counts: InventoryFilterCounts;
   filter: InventoryFilter;
-  maxRate: number;
   minHours: number;
   onFilterChange: (filter: InventoryFilter) => void;
-  onMaxRateChange: (value: number) => void;
   onMinHoursChange: (value: number) => void;
   onClearFilters: () => void;
 }
@@ -29,17 +26,14 @@ const filterOptions: Array<{
 }> = [
   { key: 'all', label: 'All providers', description: 'Every published provider' },
   { key: 'available', label: 'Bookable', description: 'Inventory online now' },
-  { key: 'near_term', label: 'This week', description: 'Near-term slot listed' },
   { key: 'mine', label: 'My inventory', description: 'Providers owned by wallet' },
 ];
 
 export default function ProviderInventoryPanel({
   counts,
   filter,
-  maxRate,
   minHours,
   onFilterChange,
-  onMaxRateChange,
   onMinHoursChange,
   onClearFilters,
 }: ProviderInventoryPanelProps) {
@@ -89,25 +83,6 @@ export default function ProviderInventoryPanel({
       </div>
 
       <div className="mt-6 space-y-5 border-t border-[var(--border-muted)] pt-5">
-        <label className="block">
-          <span className="flex items-center justify-between gap-3 text-sm font-medium text-[var(--text)]">
-            <span className="flex items-center gap-2">
-              <Coins aria-hidden="true" className="h-4 w-4 text-[var(--primary)]" />
-              Max rate
-            </span>
-            <span className="tabular-nums text-[var(--text-muted)]">${maxRate}/h</span>
-          </span>
-          <input
-            type="range"
-            min="150"
-            max="650"
-            step="25"
-            value={maxRate}
-            onChange={(event) => onMaxRateChange(Number(event.target.value))}
-            className="mt-3 w-full accent-[var(--primary)]"
-          />
-        </label>
-
         <label className="block">
           <span className="flex items-center justify-between gap-3 text-sm font-medium text-[var(--text)]">
             <span className="flex items-center gap-2">

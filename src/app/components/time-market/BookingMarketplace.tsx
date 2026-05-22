@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useChainId } from 'wagmi';
+import { useAccount, useChainId, usePublicClient } from 'wagmi';
 import {
   Activity,
   CalendarClock,
@@ -11,8 +11,10 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { getChainDisplayName } from '../../lib/wagmi';
+import { getTimeMarketContracts } from '../../shared/constants';
 import { isV4SupportedChainId } from '../../shared/uniswapV4';
-import type { AddressString, ProviderInventory } from '../../types/time-market';
+import { BookingService } from '../../services/bookingService';
+import type { ProviderInventory } from '../../types/time-market';
 import BookingCheckout from './BookingCheckout';
 import LiquidityPanel from './LiquidityPanel';
 import ProviderInventoryPanel, {
@@ -27,21 +29,10 @@ export interface MarketplaceProps {
 
 export interface MarketplaceProvider extends ProviderInventory {
   headline: string;
-  specialty: string;
-  timezone: string;
-  nextSlot: string;
-  nextSlotPriority: number;
-  rateUsdc: number;
-  completionRate: number;
-  poolDepth: string;
-  quoteWindowMinutes: number;
 }
 
 const WAD = BigInt(10) ** BigInt(18);
-
-function toWad(hours: number) {
-  return BigInt(hours) * WAD;
-}
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 function hoursFromWad(value: bigint) {
   return Number(value / WAD);
@@ -55,72 +46,18 @@ function isOwnedByWallet(provider: MarketplaceProvider, address?: string) {
   return Boolean(address && provider.owner.toLowerCase() === address.toLowerCase());
 }
 
-const demoProviders: MarketplaceProvider[] = [
-  {
-    providerId: '1',
-    owner: '0xaA00000000000000000000000000000000001042' as AddressString,
-    serviceName: 'Protocol architecture review',
-    headline: 'Review v4 hook boundaries, settlement assumptions, and launch risks.',
-    specialty: 'Uniswap v4 hooks',
-    timezone: 'UTC+1',
-    nextSlot: 'May 16, 14:00',
-    nextSlotPriority: 1,
-    rateUsdc: 420,
-    completionRate: 98,
-    poolDepth: '$82k',
-    quoteWindowMinutes: 9,
-    availableHoursWad: toWad(18),
-    paused: false,
-  },
-  {
-    providerId: '2',
-    owner: '0xbB00000000000000000000000000000000001188' as AddressString,
-    serviceName: 'AI workflow implementation',
-    headline: 'Turn a tokenized service plan into agentic booking and follow-up ops.',
-    specialty: 'Automation',
-    timezone: 'UTC-4',
-    nextSlot: 'May 18, 17:30',
-    nextSlotPriority: 3,
-    rateUsdc: 260,
-    completionRate: 96,
-    poolDepth: '$46k',
-    quoteWindowMinutes: 12,
-    availableHoursWad: toWad(24),
-    paused: false,
-  },
-  {
-    providerId: '3',
-    owner: '0xcC00000000000000000000000000000000001215' as AddressString,
-    serviceName: 'Security tabletop session',
-    headline: 'Map signing flows, Permit2 approvals, and booking failure recovery.',
-    specialty: 'Threat modeling',
-    timezone: 'UTC+8',
-    nextSlot: 'May 20, 09:00',
-    nextSlotPriority: 5,
-    rateUsdc: 520,
-    completionRate: 99,
-    poolDepth: '$63k',
-    quoteWindowMinutes: 7,
-    availableHoursWad: toWad(6),
-    paused: false,
-  },
-  {
-    providerId: '4',
-    owner: '0xdD00000000000000000000000000000000001301' as AddressString,
-    serviceName: 'Launch readiness review',
-    headline: 'Evaluate provider inventory, quote expiry, and checkout support paths.',
-    specialty: 'Marketplace ops',
-    timezone: 'UTC',
-    nextSlot: 'Paused',
-    nextSlotPriority: 99,
-    rateUsdc: 340,
-    completionRate: 94,
-    poolDepth: '$31k',
-    quoteWindowMinutes: 6,
-    availableHoursWad: toWad(0),
-    paused: true,
-  },
-];
+function toMarketplaceProvider(provider: ProviderInventory): MarketplaceProvider {
+  return {
+    ...provider,
+    serviceName: `Provider #${provider.providerId}`,
+    headline: 'Live BookingManager inventory. Rich service metadata is not published on-chain yet.',
+  };
+}
+
+function parseError(error: unknown) {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
 
 function buildCounts(providers: MarketplaceProvider[], address?: string): InventoryFilterCounts {
   return providers.reduce<InventoryFilterCounts>(
@@ -128,11 +65,10 @@ function buildCounts(providers: MarketplaceProvider[], address?: string): Invent
       const hours = hoursFromWad(provider.availableHoursWad);
       counts.all += 1;
       if (!provider.paused && hours > 0) counts.available += 1;
-      if (!provider.paused && provider.nextSlotPriority <= 3) counts.near_term += 1;
       if (isOwnedByWallet(provider, address)) counts.mine += 1;
       return counts;
     },
-    { all: 0, available: 0, near_term: 0, mine: 0 }
+    { all: 0, available: 0, mine: 0 }
   );
 }
 
@@ -140,7 +76,6 @@ function filterProviders(
   providers: MarketplaceProvider[],
   filter: InventoryFilter,
   address: string | undefined,
-  maxRate: number,
   minHours: number
 ) {
   return providers.filter((provider) => {
@@ -148,10 +83,9 @@ function filterProviders(
     const matchesFilter =
       filter === 'all' ||
       (filter === 'available' && !provider.paused && hours > 0) ||
-      (filter === 'near_term' && !provider.paused && provider.nextSlotPriority <= 3) ||
       (filter === 'mine' && isOwnedByWallet(provider, address));
 
-    return matchesFilter && provider.rateUsdc <= maxRate && hours >= minHours;
+    return matchesFilter && hours >= minHours;
   });
 }
 
@@ -161,18 +95,71 @@ export default function BookingMarketplace({
 }: MarketplaceProps) {
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
+  const publicClient = usePublicClient({ chainId });
   const [filter, setFilter] = useState<InventoryFilter>('available');
-  const [maxRate, setMaxRate] = useState(550);
   const [minHours, setMinHours] = useState(1);
-  const [selectedProviderId, setSelectedProviderId] = useState(demoProviders[0].providerId);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
   const [requestedHours, setRequestedHours] = useState(2);
+  const [providers, setProviders] = useState<MarketplaceProvider[]>([]);
+  const [providerWarnings, setProviderWarnings] = useState<string[]>([]);
+  const [providerLoadError, setProviderLoadError] = useState<string | null>(null);
+  const [isLoadingProviders, setIsLoadingProviders] = useState(false);
 
   const chainName = getChainDisplayName(chainId);
   const wrongNetwork = !isV4SupportedChainId(chainId);
-  const counts = useMemo(() => buildCounts(demoProviders, address), [address]);
+  const chainContracts = getTimeMarketContracts(chainId);
+  const bookingManagerAddress = chainContracts?.bookingManager;
+  const bookingConfigured = Boolean(
+    bookingManagerAddress && bookingManagerAddress.toLowerCase() !== ZERO_ADDRESS
+  );
+
+  const bookingService = useMemo(
+    () =>
+      new BookingService({
+        bookingManagerAddress: bookingManagerAddress as `0x${string}`,
+        publicClient,
+      }),
+    [bookingManagerAddress, publicClient]
+  );
+
+  const loadProviders = useCallback(async () => {
+    if (wrongNetwork || !publicClient) {
+      setProviders([]);
+      setProviderWarnings([]);
+      setProviderLoadError(null);
+      return;
+    }
+    if (!bookingConfigured) {
+      setProviders([]);
+      setProviderWarnings([]);
+      setProviderLoadError('BookingManager is not configured for this chain.');
+      return;
+    }
+
+    setIsLoadingProviders(true);
+    setProviderLoadError(null);
+
+    try {
+      const result = await bookingService.listProviderInventories({ includePaused: true });
+      setProviders(result.providers.map(toMarketplaceProvider));
+      setProviderWarnings(result.warnings);
+    } catch (error) {
+      setProviders([]);
+      setProviderWarnings([]);
+      setProviderLoadError(parseError(error));
+    } finally {
+      setIsLoadingProviders(false);
+    }
+  }, [bookingConfigured, bookingService, publicClient, wrongNetwork]);
+
+  useEffect(() => {
+    void loadProviders();
+  }, [loadProviders]);
+
+  const counts = useMemo(() => buildCounts(providers, address), [address, providers]);
   const visibleProviders = useMemo(
-    () => filterProviders(demoProviders, filter, address, maxRate, minHours),
-    [address, filter, maxRate, minHours]
+    () => filterProviders(providers, filter, address, minHours),
+    [address, filter, minHours, providers]
   );
   const selectedProvider =
     visibleProviders.find((provider) => provider.providerId === selectedProviderId) ??
@@ -184,9 +171,8 @@ export default function BookingMarketplace({
     : 0;
 
   useEffect(() => {
-    if (!selectedProvider && visibleProviders[0]) {
-      setSelectedProviderId(visibleProviders[0].providerId);
-    }
+    if (selectedProvider) return;
+    setSelectedProviderId(visibleProviders[0]?.providerId ?? null);
   }, [selectedProvider, visibleProviders]);
 
   useEffect(() => {
@@ -198,7 +184,6 @@ export default function BookingMarketplace({
 
   const clearFilters = () => {
     setFilter('available');
-    setMaxRate(550);
     setMinHours(1);
   };
 
@@ -271,10 +256,8 @@ export default function BookingMarketplace({
           <div className="material-panel flex items-center gap-3 p-3">
             <Coins aria-hidden="true" className="h-5 w-5 text-[var(--primary)]" />
             <div>
-              <p className="text-xs text-[var(--text-faint)]">Selected quote</p>
-              <p className="tabular-nums text-lg font-semibold text-[var(--text-strong)]">
-                {selectedProvider ? `$${selectedProvider.rateUsdc}/h` : 'None'}
-              </p>
+              <p className="text-xs text-[var(--text-faint)]">Booking quote</p>
+              <p className="text-lg font-semibold text-[var(--text-strong)]">Real signer required</p>
             </div>
           </div>
           <div className="material-panel flex items-center gap-3 p-3">
@@ -292,11 +275,9 @@ export default function BookingMarketplace({
           <ProviderInventoryPanel
             counts={counts}
             filter={filter}
-            maxRate={maxRate}
             minHours={minHours}
             onClearFilters={clearFilters}
             onFilterChange={setFilter}
-            onMaxRateChange={setMaxRate}
             onMinHoursChange={setMinHours}
           />
 
@@ -307,30 +288,70 @@ export default function BookingMarketplace({
                   Providers
                 </p>
                 <h2 className="mt-1 text-lg font-semibold text-[var(--text-strong)]">
-                  Published booking inventory
+                  Live BookingManager inventory
                 </h2>
               </div>
               <p className="text-sm text-[var(--text-muted)]">
-                {visibleProviders.length} of {demoProviders.length} providers shown
+                {visibleProviders.length} of {providers.length} providers shown
               </p>
             </div>
 
+            {providerWarnings.length > 0 && (
+              <div className="mb-4 rounded-[var(--radius-control)] border border-[var(--warning)] bg-[var(--amber-muted)] p-3 text-sm text-[var(--text)]">
+                Loaded with {providerWarnings.length} provider read warning
+                {providerWarnings.length === 1 ? '' : 's'}.
+              </div>
+            )}
+
             <div className="provider-table-grid hidden border-b border-[var(--border-muted)] pb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-faint)] min-[861px]:grid">
               <span>Provider</span>
-              <span>Rate</span>
+              <span>Owner</span>
               <span>Inventory</span>
-              <span>Next slot</span>
+              <span>Pricing</span>
               <span>Status</span>
             </div>
 
             <div className="divide-y divide-[var(--border-muted)]">
-              {visibleProviders.length === 0 ? (
+              {isLoadingProviders ? (
                 <div className="flex min-h-[220px] items-center justify-center text-center">
                   <div>
-                    <CircleAlert
-                      aria-hidden="true"
-                      className="mx-auto h-6 w-6 text-[var(--warning)]"
-                    />
+                    <Activity aria-hidden="true" className="mx-auto h-6 w-6 text-[var(--primary)]" />
+                    <p className="mt-3 font-semibold text-[var(--text-strong)]">
+                      Loading BookingManager providers...
+                    </p>
+                    <p className="mt-1 text-sm text-[var(--text-muted)]">
+                      Reading live inventory from the selected chain.
+                    </p>
+                  </div>
+                </div>
+              ) : providerLoadError ? (
+                <div className="flex min-h-[220px] items-center justify-center text-center">
+                  <div>
+                    <CircleAlert aria-hidden="true" className="mx-auto h-6 w-6 text-[var(--danger)]" />
+                    <p className="mt-3 font-semibold text-[var(--text-strong)]">
+                      Provider loading failed
+                    </p>
+                    <p className="mt-1 max-w-[52ch] text-sm text-[var(--text-muted)]">
+                      {providerLoadError}
+                    </p>
+                  </div>
+                </div>
+              ) : providers.length === 0 ? (
+                <div className="flex min-h-[220px] items-center justify-center text-center">
+                  <div>
+                    <CircleAlert aria-hidden="true" className="mx-auto h-6 w-6 text-[var(--warning)]" />
+                    <p className="mt-3 font-semibold text-[var(--text-strong)]">
+                      No providers registered on this BookingManager yet
+                    </p>
+                    <p className="mt-1 text-sm text-[var(--text-muted)]">
+                      A provider manager can publish initial inventory from the checkout panel.
+                    </p>
+                  </div>
+                </div>
+              ) : visibleProviders.length === 0 ? (
+                <div className="flex min-h-[220px] items-center justify-center text-center">
+                  <div>
+                    <CircleAlert aria-hidden="true" className="mx-auto h-6 w-6 text-[var(--warning)]" />
                     <p className="mt-3 font-semibold text-[var(--text-strong)]">
                       No providers match these filters
                     </p>
@@ -371,16 +392,13 @@ export default function BookingMarketplace({
                         <span className="mt-1 block max-w-[58ch] text-sm text-[var(--text-muted)]">
                           {provider.headline}
                         </span>
-                        <span className="mt-2 block text-xs text-[var(--text-faint)]">
-                          {provider.specialty} / {shortAddress(provider.owner)} / {provider.timezone}
-                        </span>
                       </span>
                       <span>
                         <span className="text-xs text-[var(--text-faint)] min-[861px]:hidden">
-                          Rate
+                          Owner
                         </span>
                         <span className="tabular-nums block font-semibold text-[var(--text-strong)]">
-                          ${provider.rateUsdc}/h
+                          {shortAddress(provider.owner)}
                         </span>
                       </span>
                       <span>
@@ -393,10 +411,10 @@ export default function BookingMarketplace({
                       </span>
                       <span>
                         <span className="text-xs text-[var(--text-faint)] min-[861px]:hidden">
-                          Next slot
+                          Pricing
                         </span>
-                        <span className="block font-medium text-[var(--text)]">
-                          {provider.nextSlot}
+                        <span className="block font-medium text-[var(--text-muted)]">
+                          Not published on-chain
                         </span>
                       </span>
                       <span>
@@ -412,7 +430,7 @@ export default function BookingMarketplace({
                           ) : (
                             <ShieldCheck aria-hidden="true" className="h-3.5 w-3.5" />
                           )}
-                          {unavailable ? 'Paused' : `${provider.completionRate}% complete`}
+                          {unavailable ? 'Paused' : 'Available'}
                         </span>
                       </span>
                     </button>
@@ -431,6 +449,7 @@ export default function BookingMarketplace({
               chainName={chainName}
               chainId={chainId}
               walletAddress={address}
+              onProviderRegistered={loadProviders}
               onRequestedHoursChange={setRequestedHours}
             />
             <LiquidityPanel provider={selectedProvider} chainId={chainId} />
