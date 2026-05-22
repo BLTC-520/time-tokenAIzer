@@ -8,7 +8,8 @@
     "start": "next start",
     "contracts:compile": "node contracts/scripts/compile.mjs",
     "contracts:compile:tests": "node contracts/scripts/compile.mjs --tests",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:booking-quote": "rm -rf .omx/tmp/booking-quote-test && tsc --outDir .omx/tmp/booking-quote-test --module commonjs --target es2022 --moduleResolution node --skipLibCheck --esModuleInterop --resolveJsonModule scripts/test-booking-quote.ts src/app/api/booking/quote/policy.ts && node .omx/tmp/booking-quote-test/scripts/test-booking-quote.js"
   },
   "dependencies": {
     "@chainlink/functions-toolkit": "^0.3.2",

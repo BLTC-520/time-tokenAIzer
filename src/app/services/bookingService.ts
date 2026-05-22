@@ -4,6 +4,30 @@ import type { BookingQuote, BookingQuoteRequest, ProviderInventory } from '../ty
 export const BOOKING_MANAGER_ABI = [
   {
     type: 'function',
+    name: 'nextProviderId',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'PROVIDER_MANAGER_ROLE',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'bytes32' }],
+  },
+  {
+    type: 'function',
+    name: 'hasRole',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'role', type: 'bytes32' },
+      { name: 'account', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    type: 'function',
     name: 'providers',
     stateMutability: 'view',
     inputs: [{ name: 'providerId', type: 'uint256' }],
@@ -56,10 +80,78 @@ export interface BookingServiceOptions {
   quoteMode?: 'auto' | 'real' | 'mock';
 }
 
+export interface ProviderInventoryListOptions {
+  includePaused?: boolean;
+  limit?: number;
+}
+
+export interface ProviderInventoryListResult {
+  providers: ProviderInventory[];
+  warnings: string[];
+  scanned: number;
+  nextProviderId: bigint;
+}
+
 type JsonRecord = Record<string, unknown>;
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+const DEFAULT_PROVIDER_SCAN_LIMIT = 100;
+const MAX_PROVIDER_SCAN_LIMIT = 250;
+const PROVIDER_SCAN_BATCH_SIZE = 8;
+
+const clampProviderScanLimit = (value: number) =>
+  Math.min(MAX_PROVIDER_SCAN_LIMIT, Math.max(1, Math.floor(value)));
+
+const resolveProviderScanLimit = (limit: number | undefined) => {
+  if (typeof limit === 'number' && Number.isFinite(limit)) {
+    return clampProviderScanLimit(limit);
+  }
+
+  const envLimit = Number.parseInt(process.env.NEXT_PUBLIC_PROVIDER_SCAN_LIMIT ?? '', 10);
+  if (Number.isFinite(envLimit)) {
+    return clampProviderScanLimit(envLimit);
+  }
+
+  return DEFAULT_PROVIDER_SCAN_LIMIT;
+};
 
 export class BookingService {
   constructor(private readonly options: BookingServiceOptions = {}) {}
+
+  async getNextProviderId(): Promise<bigint> {
+    const { publicClient, bookingManagerAddress } = this.options;
+    if (!publicClient || !bookingManagerAddress) {
+      throw new Error('getNextProviderId requires a viem PublicClient and BookingManager address.');
+    }
+
+    return publicClient.readContract({
+      address: bookingManagerAddress,
+      abi: BOOKING_MANAGER_ABI,
+      functionName: 'nextProviderId',
+    });
+  }
+
+  async hasProviderManagerRole(account: Address): Promise<boolean> {
+    const { publicClient, bookingManagerAddress } = this.options;
+    if (!publicClient || !bookingManagerAddress) {
+      throw new Error(
+        'hasProviderManagerRole requires a viem PublicClient and BookingManager address.'
+      );
+    }
+
+    const providerManagerRole = await publicClient.readContract({
+      address: bookingManagerAddress,
+      abi: BOOKING_MANAGER_ABI,
+      functionName: 'PROVIDER_MANAGER_ROLE',
+    });
+
+    return publicClient.readContract({
+      address: bookingManagerAddress,
+      abi: BOOKING_MANAGER_ABI,
+      functionName: 'hasRole',
+      args: [providerManagerRole, account],
+    });
+  }
 
   async getProviderInventory(providerId: bigint): Promise<ProviderInventory> {
     const { publicClient, bookingManagerAddress } = this.options;
@@ -82,6 +174,48 @@ export class BookingService {
       serviceName: `Provider ${providerId.toString()}`,
       availableHoursWad,
       paused,
+    };
+  }
+
+  async listProviderInventories(
+    options: ProviderInventoryListOptions = {}
+  ): Promise<ProviderInventoryListResult> {
+    const nextProviderId = await this.getNextProviderId();
+    const scanLimit = resolveProviderScanLimit(options.limit);
+    const highestProviderId = nextProviderId > BigInt(1) ? nextProviderId - BigInt(1) : BigInt(0);
+    const scanned = Number(
+      highestProviderId > BigInt(scanLimit) ? BigInt(scanLimit) : highestProviderId
+    );
+    const providerIds = Array.from({ length: scanned }, (_, index) => BigInt(index + 1));
+    const providers: ProviderInventory[] = [];
+    const warnings: string[] = [];
+
+    for (let index = 0; index < providerIds.length; index += PROVIDER_SCAN_BATCH_SIZE) {
+      const batch = providerIds.slice(index, index + PROVIDER_SCAN_BATCH_SIZE);
+      const batchResults = await Promise.allSettled(
+        batch.map((providerId) => this.getProviderInventory(providerId))
+      );
+
+      batchResults.forEach((result, batchIndex) => {
+        const providerId = batch[batchIndex];
+        if (result.status === 'rejected') {
+          const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+          warnings.push(`Provider ${providerId.toString()} read failed: ${message}`);
+          return;
+        }
+
+        const provider = result.value;
+        if (provider.owner.toLowerCase() === ZERO_ADDRESS) return;
+        if (!options.includePaused && provider.paused) return;
+        providers.push(provider);
+      });
+    }
+
+    return {
+      providers,
+      warnings,
+      scanned,
+      nextProviderId,
     };
   }
 

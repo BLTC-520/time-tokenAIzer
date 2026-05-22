@@ -8,20 +8,27 @@ import {
   http,
   isAddress,
   keccak256,
-  toBytes,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getTimeMarketContracts, RPC_URLS } from '../../../shared/constants';
+import {
+  BookingQuoteConfigError,
+  MOCK_SIGNATURE,
+  QUOTE_DOMAIN_NAME,
+  QUOTE_DOMAIN_VERSION,
+  QUOTE_SIGNER_ROLE,
+  assertExpectedQuoteSignerAddress,
+  assertQuoteSignerRole,
+  parseExpectedQuoteSignerAddress,
+  quoteTtlSeconds,
+  requireQuoteSignerPrivateKey,
+  resolveQuoteMode,
+  shouldStrictlyValidateProvider,
+} from './policy';
 
 export const runtime = 'nodejs';
 
-type QuoteMode = 'auto' | 'real' | 'mock';
-
-const QUOTE_DOMAIN_NAME = 'TimeTokenAIzerBooking';
-const QUOTE_DOMAIN_VERSION = '1';
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
-const QUOTE_SIGNER_ROLE = keccak256(toBytes('QUOTE_SIGNER_ROLE'));
-const MOCK_SIGNATURE = `0x${'00'.repeat(65)}` as Hex;
 
 const bookingManagerReadAbi = [
   {
@@ -78,34 +85,6 @@ const parseUnsignedBigInt = (value: unknown, field: string): bigint => {
   }
 
   throw new Error(`Field "${field}" must be an unsigned integer string.`);
-};
-
-const normalizeQuoteMode = (value: unknown): QuoteMode => {
-  if (value === 'real' || value === 'mock' || value === 'auto') {
-    return value;
-  }
-  return 'auto';
-};
-
-const normalizePrivateKey = (value: string | undefined): Hex | null => {
-  if (!value) return null;
-  const normalized = value.startsWith('0x') ? value : `0x${value}`;
-  if (!/^0x[0-9a-fA-F]{64}$/.test(normalized)) return null;
-  return normalized as Hex;
-};
-
-const providerChecksEnabled = (): boolean => {
-  const raw = process.env.BOOKING_QUOTE_STRICT_PROVIDER_CHECK;
-  if (!raw) return true;
-  return !['0', 'false', 'no', 'off'].includes(raw.toLowerCase());
-};
-
-const quoteTtlSeconds = (): bigint => {
-  const parsed = Number.parseInt(process.env.BOOKING_QUOTE_TTL_SECONDS ?? '600', 10);
-  if (!Number.isFinite(parsed) || parsed < 30) {
-    return BigInt(600);
-  }
-  return BigInt(parsed);
 };
 
 const buildQuoteId = (
@@ -173,20 +152,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Field "hoursWad" must be greater than 0.' }, { status: 400 });
     }
 
-    const envMode = normalizeQuoteMode(process.env.BOOKING_QUOTE_MODE);
-    const requestedMode = normalizeQuoteMode(body.quoteMode);
-    const privateKey = normalizePrivateKey(process.env.QUOTE_SIGNER_PRIVATE_KEY);
-    const resolvedMode: 'real' | 'mock' = (() => {
-      if (requestedMode === 'real') return 'real';
-      if (requestedMode === 'mock') return 'mock';
-      if (envMode === 'real') return 'real';
-      if (envMode === 'mock') return 'mock';
-      return privateKey ? 'real' : 'mock';
-    })();
+    const resolvedMode = resolveQuoteMode({
+      envMode: process.env.BOOKING_QUOTE_MODE,
+      requestedMode: body.quoteMode,
+      nodeEnv: process.env.NODE_ENV,
+    });
+    const privateKey =
+      resolvedMode === 'real'
+        ? requireQuoteSignerPrivateKey(process.env.QUOTE_SIGNER_PRIVATE_KEY)
+        : null;
 
     const bookingManagerAddress = contracts.bookingManager as Address;
     const warnings: string[] = [];
-    const strictProviderCheck = providerChecksEnabled() && resolvedMode === 'real';
+    const strictProviderCheck = shouldStrictlyValidateProvider(
+      resolvedMode,
+      process.env.BOOKING_QUOTE_STRICT_PROVIDER_CHECK
+    );
     const rpcUrl = RPC_URLS[chainIdNumber as keyof typeof RPC_URLS];
     if (!rpcUrl) {
       return NextResponse.json(
@@ -254,7 +235,7 @@ export async function POST(request: Request) {
     }
 
     const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
-    const expiresAt = nowSeconds + quoteTtlSeconds();
+    const expiresAt = nowSeconds + quoteTtlSeconds(process.env.BOOKING_QUOTE_TTL_SECONDS);
     const nonce =
       (BigInt(Date.now()) << BigInt(64)) | BigInt(`0x${randomBytes(8).toString('hex')}`);
     const quoteId = buildQuoteId(
@@ -272,15 +253,12 @@ export async function POST(request: Request) {
     let signerAddress: Address | null = null;
 
     if (resolvedMode === 'real') {
-      if (!privateKey) {
-        return NextResponse.json(
-          { error: 'QUOTE_SIGNER_PRIVATE_KEY is required for real quote mode.' },
-          { status: 500 }
-        );
-      }
-
-      const signer = privateKeyToAccount(privateKey);
+      const signer = privateKeyToAccount(privateKey as Hex);
       signerAddress = signer.address;
+      assertExpectedQuoteSignerAddress(
+        signer.address,
+        parseExpectedQuoteSignerAddress(process.env.QUOTE_SIGNER_ADDRESS)
+      );
 
       const hasSignerRole = await publicClient.readContract({
         address: bookingManagerAddress,
@@ -288,16 +266,11 @@ export async function POST(request: Request) {
         functionName: 'hasRole',
         args: [QUOTE_SIGNER_ROLE, signer.address],
       });
-      if (!hasSignerRole) {
-        return NextResponse.json(
-          {
-            error:
-              `Configured signer ${signer.address} does not have QUOTE_SIGNER_ROLE on ` +
-              `${bookingManagerAddress}.`,
-          },
-          { status: 500 }
-        );
-      }
+      assertQuoteSignerRole({
+        hasRole: hasSignerRole,
+        signerAddress: signer.address,
+        bookingManagerAddress,
+      });
 
       signature = await signer.signTypedData({
         domain: {
@@ -336,6 +309,13 @@ export async function POST(request: Request) {
       warnings,
     });
   } catch (error) {
+    if (error instanceof BookingQuoteConfigError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status }
+      );
+    }
+
     console.error('Booking quote route failed:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Booking quote route failed.' },

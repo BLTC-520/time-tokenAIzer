@@ -32,9 +32,9 @@ export default function LiquidityPanel({ provider, chainId }: LiquidityPanelProp
 
       <div className="space-y-3 text-sm">
         <div className="flex items-center justify-between gap-4">
-          <span className="text-[var(--text-muted)]">Pool depth</span>
+          <span className="text-[var(--text-muted)]">Selected provider</span>
           <span className="tabular-nums font-semibold text-[var(--text-strong)]">
-            {provider?.poolDepth ?? 'Select provider'}
+            {provider ? `#${provider.providerId}` : 'Select provider'}
           </span>
         </div>
         <div className="flex items-center justify-between gap-4">
